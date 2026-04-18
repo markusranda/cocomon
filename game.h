@@ -83,7 +83,17 @@ enum class PlayerAnimState {
 enum class WorldEntity {
     Grass,
     GrassTall,
+    WallGrassEnd,
+    WallGrassLine,
+    WallGrassBend,
+    WallGrassT,
+    WallGrassX,
     COUNT,
+};
+
+struct WorldEntityDef {
+    WorldEntity entity;
+    float       rot;
 };
 
 enum class BattleUIIndex : uint32_t {
@@ -130,7 +140,7 @@ extern GameState game_state_next;
 extern uint32_t ui_cursor;
 extern Music current_music_stream;
 extern bool music_loaded;
-extern WorldEntity world[world_height][world_width];
+extern WorldEntityDef world[world_height][world_width];
 
 extern Texture2D tex_player;
 extern Vector2 player_pos;
