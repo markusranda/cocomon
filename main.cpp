@@ -1,122 +1,33 @@
-#include "raylib.h"
+#include "game.h"
+#include "battle.h"
 #include <assert.h>
-#include <cstdint>
+#include <csignal>
 #include <stdio.h>
 #include <string.h>
 #include <cmath>
 #include <ctime>
 
-// =====================================================================================================================
-// DATASTRUCTURES
-// =====================================================================================================================
+static inline void debug_break() {
+#if defined(_MSC_VER)
+    __debugbreak();
+#elif defined(__has_builtin)
+    #if __has_builtin(__builtin_debugtrap)
+        __builtin_debugtrap();
+    #else
+        raise(SIGTRAP);
+    #endif
+#else
+    raise(SIGTRAP);
+#endif
+}
 
-struct Vector2i {
-    int x;
-    int y;
-};
-static inline bool operator==(Vector2i a, Vector2i b) { return (a.x == b.x) && (a.y == b.y); }
-static inline bool operator!=(Vector2i a, Vector2i b) { return !(a == b); } 
-
-enum class MoveKey {
-    Nil,
-    W,
-    A,
-    S,
-    D
-};
-
-enum class GameState {
-    Overworld,
-    Battle,
-    CocomonList,
-};
-
-enum class CocomonElement {
-    Nil,
-    Grass, // Beats water
-    Water, // Beats fire
-    Fire,  // Beats grass
-    COUNT,
-};
-
-enum class CocomonMove {
-    Nil,
-    LeafBlade,
-    WaterGun,
-    Ember,
-    COUNT,
-};
-
-enum class Cocomon {
-    Nil,
-    LocoMoco,
-    FrickaFlow,
-    Molly,
-    COUNT,
-};
-
-struct CocomonMoveDef {
-    char name[32];
-    uint32_t pp;
-    uint32_t pp_max;
-    uint32_t dmg;
-    CocomonElement element;
-    uint32_t flags;
-};
-
-struct CocomonDef {
-    char name[32];
-    int health;
-    CocomonMoveDef moves[4];
-};
-
-enum class PlayerAnimState {
-    IdleDown,
-    IdleUp,
-    IdleRight,
-    IdleLeft,
-    RunDown,
-    RunUp,
-    RunRight,
-    RunLeft,
-};
-
-enum class WorldEntity {
-    Grass,
-    GrassTall,
-    COUNT,
-};
-
-enum class BattleUIIndex : uint32_t {
-    AbilityOne   = 0,
-    AbilityTwo   = 1,
-    Cocomon      = 2,
-    Cocoball     = 3,
-    AbilityThree = 4,
-    AbilityFour  = 5,
-    Nil          = 6,
-    Run          = 7,
-};
-
-// =====================================================================================================================
-// CONSTS
-// =====================================================================================================================
-
-const int screen_width = 1024;
-const int screen_height = 1024;
-const Color color_surface_0 = Color{ 130, 130, 130, 250 };
-const Color color_surface_1 = Color{ 150, 150, 150, 250 };
-const Color color_surface_2 = Color{ 170, 170, 170, 250 };
-const Color color_surface_3 = Color{ 190, 190, 190, 250 };
-const Color color_primary   = Color{ 104, 185, 199, 250 };
-const int font_size_move = 32;
-const int max_cocomons = 32;
-const int world_width = 64;
-const int world_height = 64;
-
-// These two should match
-const int   tile_size_i = 32;
-const float tile_size_f = 32.0f;
+int screen_width = default_screen_width;
+int screen_height = default_screen_height;
+extern const Color color_surface_0 = Color{ 130, 130, 130, 250 };
+extern const Color color_surface_1 = Color{ 150, 150, 150, 250 };
+extern const Color color_surface_2 = Color{ 170, 170, 170, 250 };
+extern const Color color_surface_3 = Color{ 190, 190, 190, 250 };
+extern const Color color_primary   = Color{ 104, 185, 199, 250 };
 
 // =====================================================================================================================
 // STATE
@@ -127,6 +38,7 @@ int key_count = 0;
 char cocomon_element_names[(size_t)CocomonElement::COUNT][32];
 CocomonMoveDef cocomon_moves[(size_t)CocomonMove::COUNT];
 CocomonDef cocomons[max_cocomons];
+CocomonDef cocomon_defaults[max_cocomons];
 Texture2D tex_cocomon_fronts[max_cocomons];
 Texture2D tex_cocomon_backs[max_cocomons];
 Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
@@ -158,7 +70,7 @@ float bobbing_timer = 0.0f;
 float bobbing_interval = 0.4f;
 
 // --- ENOUNTER ---
-const float chance_encounter = 0.005f;
+extern const float chance_encounter = 0.005f;
 float encounter_timer = 0.0f;
 float encounter_interval = 1.0f;
 
@@ -205,16 +117,32 @@ Vector2 world_from_tile(Vector2i tile) {
     return result;
 }
 
-Rectangle ui_draw_cocomon_box(int x, int y, const char* cocomon_name) {
+Rectangle ui_draw_cocomon_box(int x, int y, const CocomonDef& cocomon) {
     int width = int(screen_width * 0.35f);
-    int height = int(screen_height * 0.1f);
+    int height = int(screen_height * 0.13f);
     int health_box_width = width - 30;
     int health_box_height = (height * 0.15f);
-    int font_size = 34;
+    int name_font_size = 34;
+    int stats_font_size = 18;
+    float health_ratio = (float)cocomon.health / (float)cocomon.max_health;
+    if (health_ratio < 0.0f) health_ratio = 0.0f;
+    if (health_ratio > 1.0f) health_ratio = 1.0f;
+    int health_fill_width = (int)(health_box_width * health_ratio);
+    int health_bar_y = y + 10 + name_font_size;
+    int stats_y = health_bar_y + health_box_height + 8;
 
     DrawRectangle(x, y, width, height, GRAY);
-    DrawText(cocomon_name, x + 5, y + 5, font_size, WHITE);
-    DrawRectangle(x + 15, y + 5 + font_size, health_box_width, health_box_height, GREEN);
+    DrawText(cocomon.name, x + 5, y + 5, name_font_size, WHITE);
+    DrawRectangle(x + 15, health_bar_y, health_box_width, health_box_height, DARKGRAY);
+    DrawRectangle(x + 15, health_bar_y, health_fill_width, health_box_height, GREEN);
+
+    char text_hp[32];
+    snprintf(text_hp, sizeof(text_hp), "HP %d/%d", cocomon.health, cocomon.max_health);
+    DrawText(text_hp, x + 15, stats_y, stats_font_size, WHITE);
+
+    char text_stats[64];
+    snprintf(text_stats, sizeof(text_stats), "ATK %d  DEF %d  SPD %d", cocomon.attack, cocomon.defense, cocomon.speed);
+    DrawText(text_stats, x + 15, stats_y + stats_font_size + 4, stats_font_size, WHITE);
 
     return { (float)x, (float)y, (float)width, (float)height };
 }
@@ -364,13 +292,6 @@ void state_transition_overworld() {
     stop_current_music();
 }
 
-void state_transition_battle() {
-    game_state_next = GameState::Battle;
-    ui_cursor = 0;
-
-    play_music("songs/battle_anthem.mp3");
-}
-
 Rectangle player_collision_box() {
     float foot_width = 20.0f;
     float foot_height = 8.0f;
@@ -397,8 +318,10 @@ bool rect_intersects(Rectangle a, Rectangle b) {
 // =====================================================================================================================
 
 int main(void) {
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(screen_width, screen_height, "raylib 2D");
     InitAudioDevice();
+    SetWindowMinSize(640, 640);
 
     srand((unsigned int)time(NULL));
 
@@ -423,9 +346,42 @@ int main(void) {
     cocomon_moves[(size_t)CocomonMove::WaterGun] = { "WATER GUN", 30, 30, 30, CocomonElement::Water, 1 };
     cocomon_moves[(size_t)CocomonMove::LeafBlade] = { "LEAF BLADE", 30, 30, 30, CocomonElement::Grass, 1 };
 
-    cocomons[(size_t)Cocomon::LocoMoco] = { .name = "LOCOMOCO", .health = 100, .moves = { cocomon_moves[(size_t)CocomonMove::Ember], cocomon_moves[(size_t)CocomonMove::Ember], cocomon_moves[(size_t)CocomonMove::Ember], cocomon_moves[(size_t)CocomonMove::Ember] }};
-    cocomons[(size_t)Cocomon::FrickaFlow] = { .name = "FRICKA FLOW", .health = 100, .moves = { cocomon_moves[(size_t)CocomonMove::LeafBlade] }};
-    cocomons[(size_t)Cocomon::Molly] = { .name = "MOLLY", .health = 100, .moves = { cocomon_moves[(size_t)CocomonMove::WaterGun] }};
+    cocomon_defaults[(size_t)Cocomon::LocoMoco] = {
+        .name = "LOCOMOCO",
+        .health = 120,
+        .max_health = 120,
+        .attack = 18,
+        .defense = 10,
+        .speed = 14,
+        .moves = {
+            cocomon_moves[(size_t)CocomonMove::Ember],
+            cocomon_moves[(size_t)CocomonMove::Ember],
+            cocomon_moves[(size_t)CocomonMove::Ember],
+            cocomon_moves[(size_t)CocomonMove::Ember]
+        }
+    };
+    cocomon_defaults[(size_t)Cocomon::FrickaFlow] = {
+        .name = "FRICKA FLOW",
+        .health = 90,
+        .max_health = 90,
+        .attack = 15,
+        .defense = 8,
+        .speed = 20,
+        .moves = { cocomon_moves[(size_t)CocomonMove::LeafBlade] }
+    };
+    cocomon_defaults[(size_t)Cocomon::Molly] = {
+        .name = "MOLLY",
+        .health = 110,
+        .max_health = 110,
+        .attack = 16,
+        .defense = 14,
+        .speed = 10,
+        .moves = { cocomon_moves[(size_t)CocomonMove::WaterGun] }
+    };
+
+    cocomons[(size_t)Cocomon::LocoMoco] = cocomon_defaults[(size_t)Cocomon::LocoMoco];
+    cocomons[(size_t)Cocomon::FrickaFlow] = cocomon_defaults[(size_t)Cocomon::FrickaFlow];
+    cocomons[(size_t)Cocomon::Molly] = cocomon_defaults[(size_t)Cocomon::Molly];
 
     // --- WORLD SETUP ---
     for(int y = 0; y < 8; y++) {
@@ -446,6 +402,8 @@ int main(void) {
     // Main loop
     while (!WindowShouldClose()) {
         double delta = GetFrameTime();
+        screen_width = GetScreenWidth();
+        screen_height = GetScreenHeight();
         game_state = game_state_next;
         
         // DEBUG ONLY
@@ -527,6 +485,7 @@ int main(void) {
                 float lerp_factor = 10.0f * delta;
                 camera.target.x += (player_pos.x - camera.target.x) * lerp_factor;
                 camera.target.y += (player_pos.y - camera.target.y) * lerp_factor;
+                camera.offset = Vector2{ screen_width * 0.5f, screen_height * 0.5f };
 
                 // --- PLAYER ANIM ---
                 // idle rows
@@ -565,34 +524,29 @@ int main(void) {
                 if (IsKeyPressed(KEY_UP) && (ui_cursor / grid_width) > 0) ui_cursor -= grid_width;
 
                 if (IsKeyPressed(KEY_ENTER)) {
-                    switch ((BattleUIIndex)ui_cursor) {
-                        case BattleUIIndex::AbilityOne: {
-                            break;
-                        }
-                        case BattleUIIndex::AbilityTwo: {
-                            break;
-                        }
-                        case BattleUIIndex::Cocomon: {
-                            break;
-                        }
-                        case BattleUIIndex::Cocoball: {
-                            break;
-                        }
-                        case BattleUIIndex::AbilityThree: {
-                            break;
-                        }
-                        case BattleUIIndex::AbilityFour: {
-                            break;
-                        }
-                        case BattleUIIndex::Nil: {
-                            break;
-                        }
-                        case BattleUIIndex::Run: {
-                            state_transition_overworld();
-                            break;
-                        }
-                        default: {
-                            __debugbreak();
+                    BattleUIIndex selected_index = (BattleUIIndex)ui_cursor;
+                    int move_slot = battle_move_slot_from_cursor(selected_index);
+
+                    if (move_slot >= 0) {
+                        battle_player_attack(move_slot);
+                    } else {
+                        switch (selected_index) {
+                            case BattleUIIndex::Cocomon: {
+                                break;
+                            }
+                            case BattleUIIndex::Cocoball: {
+                                break;
+                            }
+                            case BattleUIIndex::Nil: {
+                                break;
+                            }
+                            case BattleUIIndex::Run: {
+                                state_transition_overworld();
+                                break;
+                            }
+                            default: {
+                                debug_break();
+                            }
                         }
                     }
                 }
@@ -606,7 +560,7 @@ int main(void) {
                 break;
             }
             default: {
-                __debugbreak();
+                debug_break();
             }
         };
 
@@ -669,7 +623,7 @@ int main(void) {
                 // Opponent box
                 int opponent_cocomon_box_x = 15;
                 int opponent_cocomon_box_y = 15;
-                ui_draw_cocomon_box(15, 15, cocomons[(size_t)opponent_cocomon_idx].name);
+                ui_draw_cocomon_box(15, 15, cocomons[(size_t)opponent_cocomon_idx]);
         
                 // Opponent cocomon
                 DrawTextureEx(tex_cocomon_fronts[(size_t)opponent_cocomon_idx], Vector2{screen_width * 0.5f, float(opponent_cocomon_box_y - -bobbing)}, 0.0f, 12.0f, WHITE);
@@ -677,7 +631,7 @@ int main(void) {
                 // Player box
                 int player_cocomon_box_x = screen_width - cocomon_status_box_width - 15;
                 int player_cocomon_box_y = action_box_y - cocomon_status_box_height - 15;
-                ui_draw_cocomon_box(player_cocomon_box_x, player_cocomon_box_y, cocomons[(size_t)player_cocomon_idx].name);
+                ui_draw_cocomon_box(player_cocomon_box_x, player_cocomon_box_y, cocomons[(size_t)player_cocomon_idx]);
                 
                 // Player cocomon
                 Texture2D tex_player_cocomon_back = tex_cocomon_backs[(size_t)player_cocomon_idx];
@@ -692,7 +646,7 @@ int main(void) {
                 break;
             }
             default: {
-                __debugbreak();
+                debug_break();
             }
         }
 
@@ -703,7 +657,7 @@ int main(void) {
         int fps = (int)(1.0f / delta);
         if (fps > 1000) fps = 1000;
         char title[64];
-        sprintf(title, "cocomon | FPS: %d", fps);
+        snprintf(title, sizeof(title), "cocomon | FPS: %d", fps);
 
         SetWindowTitle(title);
     }
