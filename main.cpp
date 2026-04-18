@@ -1258,6 +1258,7 @@ int main(void) {
     InitWindow(screen_width, screen_height, "raylib 2D");
     InitAudioDevice();
     SetWindowMinSize(640, 640);
+    SetExitKey(0);
 
     srand((unsigned int)time(NULL));
 
