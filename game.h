@@ -72,6 +72,7 @@ enum class Cocomon {
     LocoMoco,
     FrickaFlow,
     Molly,
+    Jokko,
     COUNT,
 };
 
@@ -147,6 +148,7 @@ enum class BattleUIIndex : uint32_t {
 constexpr int default_screen_width = 800;
 constexpr int default_screen_height = 800;
 constexpr int font_size_move = 32;
+constexpr int max_player_party = 6;
 constexpr int max_cocomons = 32;
 constexpr int world_width = 64;
 constexpr int world_height = 64;
@@ -170,6 +172,9 @@ extern CocomonDef cocomon_defaults[max_cocomons];
 extern Texture2D tex_cocomon_fronts[max_cocomons];
 extern Texture2D tex_cocomon_backs[max_cocomons];
 extern Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
+extern Cocomon player_party[max_player_party];
+extern int player_party_count;
+extern int player_active_party_slot;
 extern Cocomon player_cocomon_idx;
 extern Cocomon opponent_cocomon_idx;
 extern GameState game_state;

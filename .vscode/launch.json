@@ -6,7 +6,7 @@
   "configurations": [
     {
       "name": "Debug game",
-          "type": "cppvsdbg",
+      "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/cocomon",
       "osx": {

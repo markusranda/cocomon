@@ -49,6 +49,9 @@ Texture2D tex_cocomon_fronts[max_cocomons];
 Texture2D tex_cocomon_backs[max_cocomons];
 Texture2D tex_npc[(size_t)Npc::COUNT];
 Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
+Cocomon player_party[max_player_party];
+int player_party_count = 0;
+int player_active_party_slot = 0;
 Cocomon player_cocomon_idx = Cocomon::LocoMoco;
 Cocomon opponent_cocomon_idx = Cocomon::FrickaFlow;
 GameState game_state = GameState::Overworld;
@@ -173,6 +176,63 @@ Vector2 world_from_tile(Vector2i tile) {
     result.y = tile.y * tile_size_f;
 
     return result;
+}
+
+bool player_party_slot_is_valid(int slot) {
+    return slot >= 0 && slot < player_party_count && player_party[slot] != Cocomon::Nil;
+}
+
+int first_valid_player_party_slot() {
+    for (int slot = 0; slot < player_party_count; slot++) {
+        if (player_party_slot_is_valid(slot)) return slot;
+    }
+
+    return 0;
+}
+
+void sync_player_active_cocomon_from_party() {
+    if (!player_party_slot_is_valid(player_active_party_slot)) {
+        player_active_party_slot = first_valid_player_party_slot();
+    }
+
+    if (player_party_slot_is_valid(player_active_party_slot)) {
+        player_cocomon_idx = player_party[player_active_party_slot];
+    }
+}
+
+void set_player_active_party_slot(int slot) {
+    if (!player_party_slot_is_valid(slot)) return;
+
+    player_active_party_slot = slot;
+    player_cocomon_idx = player_party[slot];
+}
+
+void cycle_player_party_member() {
+    if (player_party_count <= 1) return;
+
+    for (int offset = 1; offset <= player_party_count; offset++) {
+        int candidate = (player_active_party_slot + offset) % player_party_count;
+        if (player_party_slot_is_valid(candidate)) {
+            set_player_active_party_slot(candidate);
+            return;
+        }
+    }
+}
+
+Cocomon random_wild_encounter_cocomon() {
+    static const Cocomon encounters[] = {
+        Cocomon::FrickaFlow,
+        Cocomon::Molly,
+        Cocomon::LocoMoco,
+        Cocomon::Jokko,
+    };
+    int encounter_count = (int)(sizeof(encounters) / sizeof(encounters[0]));
+    return encounters[rand() % encounter_count];
+}
+
+void prepare_random_encounter() {
+    sync_player_active_cocomon_from_party();
+    opponent_cocomon_idx = random_wild_encounter_cocomon();
 }
 
 Rectangle ui_draw_cocomon_box(int x, int y, const CocomonDef& cocomon, float displayed_health = -1.0f) {
@@ -599,7 +659,13 @@ void battle_update_playback(float delta) {
     }
 }
 
-void enter_battle() {
+void enter_battle(bool random_wild_encounter = false) {
+    if (random_wild_encounter) {
+        prepare_random_encounter();
+    } else {
+        sync_player_active_cocomon_from_party();
+    }
+
     battle::start();
     battle_clear_playback();
     battle_reset_health_display();
@@ -797,10 +863,12 @@ int main(void) {
     tex_cocomon_fronts[(size_t)Cocomon::LocoMoco] = LoadTexture("sprites/locomoco_front.png");
     tex_cocomon_fronts[(size_t)Cocomon::FrickaFlow] = LoadTexture("sprites/fricka_flow_front.png");
     tex_cocomon_fronts[(size_t)Cocomon::Molly] = LoadTexture("sprites/molly_front.png");
+    tex_cocomon_fronts[(size_t)Cocomon::Jokko] = LoadTexture("sprites/jokko_front.png");
 
     tex_cocomon_backs[(size_t)Cocomon::LocoMoco] = LoadTexture("sprites/locomoco_back.png");
     tex_cocomon_backs[(size_t)Cocomon::FrickaFlow] = LoadTexture("sprites/fricka_flow_back.png");
     tex_cocomon_backs[(size_t)Cocomon::Molly] = LoadTexture("sprites/molly_back.png");
+    tex_cocomon_backs[(size_t)Cocomon::Jokko] = LoadTexture("sprites/jokko_back.png");
 
     tex_npc[(size_t)Npc::Yamenko] = LoadTexture("sprites/npc_yamenko.png");
 
@@ -856,10 +924,31 @@ int main(void) {
         .speed = 10,
         .moves = { cocomon_moves[(size_t)CocomonMove::WaterGun] }
     };
+    cocomon_defaults[(size_t)Cocomon::Jokko] = {
+        .name = "JOKKO",
+        .element = CocomonElement::Fire,
+        .health = 100,
+        .max_health = 100,
+        .attack = 17,
+        .defense = 9,
+        .speed = 18,
+        .moves = {
+            cocomon_moves[(size_t)CocomonMove::Ember],
+            cocomon_moves[(size_t)CocomonMove::LeafBlade]
+        }
+    };
 
     cocomons[(size_t)Cocomon::LocoMoco] = cocomon_defaults[(size_t)Cocomon::LocoMoco];
     cocomons[(size_t)Cocomon::FrickaFlow] = cocomon_defaults[(size_t)Cocomon::FrickaFlow];
     cocomons[(size_t)Cocomon::Molly] = cocomon_defaults[(size_t)Cocomon::Molly];
+    cocomons[(size_t)Cocomon::Jokko] = cocomon_defaults[(size_t)Cocomon::Jokko];
+
+    player_party[0] = Cocomon::LocoMoco;
+    player_party[1] = Cocomon::Molly;
+    player_party[2] = Cocomon::FrickaFlow;
+    player_party_count = 3;
+    player_active_party_slot = 0;
+    sync_player_active_cocomon_from_party();
 
     // --- WORLD SETUP ---
     for(int y = 0; y < 16; y++) {
@@ -923,6 +1012,10 @@ int main(void) {
         // Game state update
         switch (game_state) {
             case GameState::Overworld: {
+                if (IsKeyPressed(KEY_TAB)) {
+                    cycle_player_party_member();
+                }
+
                 // --- PLAYER MOVEMENT ---
                 float move_x = 0.0f;
                 float move_y = 0.0f;
@@ -971,7 +1064,7 @@ int main(void) {
 
                 // --- ENCOUNTER ---
                 if (standing_in_tall_grass && moving && encounter_timer <= 0.0f && chance(chance_encounter)) {
-                    enter_battle();
+                    enter_battle(true);
                     encounter_timer = encounter_interval;
                     break;
                 }
