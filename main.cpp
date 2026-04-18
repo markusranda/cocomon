@@ -61,10 +61,11 @@ Music current_music_stream = {};
 bool music_loaded = false;
 WorldEntityDef world[world_height][world_width];
 const NpcDef npcs[] = {
-    { Npc::Yamenko, world_from_tile({25, 25}), 1 },
-    { Npc::Yamenko, world_from_tile({50, 33}), 2 },
-    { Npc::Yamenko, world_from_tile({33, 50}), 3 },
-    { Npc::Yamenko, world_from_tile({5, 22}), 4 },
+    { Npc::Yamenko, world_from_tile({25, 25}), EntityDirection::Down },
+    { Npc::Yamenko, world_from_tile({50, 33}), EntityDirection::Up },
+    { Npc::Yamenko, world_from_tile({33, 50}), EntityDirection::Right },
+    { Npc::Yamenko, world_from_tile({5, 22}),  EntityDirection::Left },
+    { Npc::Ippip,   world_from_tile({32, 32}), EntityDirection::Down },
 };
 const uint32_t npc_count = sizeof(npcs) / sizeof(npcs[0]);
 
@@ -871,6 +872,7 @@ int main(void) {
     tex_cocomon_backs[(size_t)Cocomon::Jokko] = LoadTexture("sprites/jokko_back.png");
 
     tex_npc[(size_t)Npc::Yamenko] = LoadTexture("sprites/npc_yamenko.png");
+    tex_npc[(size_t)Npc::Yamenko] = LoadTexture("sprites/npc_ippip.png");
 
     tex_world_entities[(size_t)WorldEntity::Grass]         = LoadTexture("sprites/grass_tile.png");
     tex_world_entities[(size_t)WorldEntity::GrassTall]     = LoadTexture("sprites/grass_tile_tall.png");
@@ -1217,7 +1219,7 @@ int main(void) {
                     NpcDef npc = npcs[idx];
                     Texture2D tex = tex_npc[(size_t)npc.npc];
                     Rectangle src = { 
-                        npc.dir * person_width, 
+                        (uint32_t)npc.dir * person_width, 
                         0.0f, 
                         person_width, 
                         person_height,

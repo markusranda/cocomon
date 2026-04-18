@@ -34,6 +34,7 @@ static inline bool operator!=(Vector2i a, Vector2i b) { return !(a == b); }
 enum class Npc {
     Nil,
     Yamenko,
+    Ippip,
     COUNT,
 };
 
@@ -98,6 +99,13 @@ struct CocomonDef {
     CocomonMoveDef moves[max_cocomon_moves];
 };
 
+enum class EntityDirection : uint32_t {
+    Down,
+    Up,
+    Right,
+    Left
+};
+
 enum class PlayerAnimState {
     IdleDown,
     IdleUp,
@@ -131,7 +139,7 @@ struct WorldEntityDef {
 struct NpcDef {
     Npc npc;
     Vector2 pos;
-    int dir; // Notice: All npcs are assumed to have all four directions
+    EntityDirection dir; // Notice: All npcs are assumed to have all four directions
 };
 
 enum class BattleUIIndex : uint32_t {
