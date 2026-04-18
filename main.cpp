@@ -60,14 +60,8 @@ uint32_t ui_cursor = 0; // Each scene understands what this means.
 Music current_music_stream = {};
 bool music_loaded = false;
 WorldEntityDef world[world_height][world_width];
-const NpcDef npcs[] = {
-    { Npc::Yamenko, world_from_tile({25, 25}), EntityDirection::Down },
-    { Npc::Yamenko, world_from_tile({50, 33}), EntityDirection::Up },
-    { Npc::Yamenko, world_from_tile({33, 50}), EntityDirection::Right },
-    { Npc::Yamenko, world_from_tile({5, 22}),  EntityDirection::Left },
-    { Npc::Ippip,   world_from_tile({30, 30}), EntityDirection::Down },
-};
-const uint32_t npc_count = sizeof(npcs) / sizeof(npcs[0]);
+NpcDef npcs[max_npcs] = {};
+uint32_t npc_count = 0;
 
 // --- PLAYER ---
 Texture2D tex_player;
@@ -131,6 +125,13 @@ float tile_anime_interval = 0.25f;
 // =====================================================================================================================
 // METHODS
 // =====================================================================================================================
+
+inline float distance(Vector2i a, Vector2i b) {
+    int dx = b.x - a.x;
+    int dy = b.y - a.y;
+
+    return sqrtf((float)(dx * dx + dy * dy));
+}
 
 void play_music(const char* path) {
     Music music_battle_anthem = LoadMusicStream(path);
@@ -900,6 +901,17 @@ void move_and_resolve_player(Vector2 delta) {
     resolve_against_npc_y(delta.y);
 }
 
+Vector2i vector2i_from_direction(EntityDirection dir) {
+    switch (dir) {
+        case EntityDirection::Up:    return { 0, -1 };
+        case EntityDirection::Right: return { 1,  0 };
+        case EntityDirection::Down:  return { 0,  1 };
+        case EntityDirection::Left:  return { -1, 0 };
+    }
+
+    return { 0, 0 }; // fallback
+}
+
 // =====================================================================================================================
 // MAIN
 // =====================================================================================================================
@@ -1005,6 +1017,12 @@ int main(void) {
     player_active_party_slot = 0;
     sync_player_active_cocomon_from_party();
 
+    npcs[npc_count++] = { Npc::Yamenko, world_from_tile({25, 25}), EntityDirection::Down };
+    npcs[npc_count++] = { Npc::Yamenko, world_from_tile({50, 33}), EntityDirection::Up };
+    npcs[npc_count++] = { Npc::Yamenko, world_from_tile({33, 50}), EntityDirection::Right };
+    npcs[npc_count++] = { Npc::Yamenko, world_from_tile({5, 22}),  EntityDirection::Left };
+    npcs[npc_count++] = { Npc::Ippip,   world_from_tile({30, 30}), EntityDirection::Down };
+
     // --- WORLD SETUP ---
     for(int y = 0; y < 16; y++) {
         for(int x = 0; x < 16; x++) {
@@ -1057,7 +1075,7 @@ int main(void) {
         screen_width = GetScreenWidth();
         screen_height = GetScreenHeight();
         game_state = game_state_next;
-        
+
         // DEBUG ONLY
         if (IsKeyPressed(KEY_F1)) state_transition_overworld();
         if (IsKeyPressed(KEY_F2)) enter_battle();
@@ -1152,7 +1170,7 @@ int main(void) {
                     player_frame = (player_frame + 1) % player_frames_per_row;
                 }
 
-                // ANIMATE TILES
+                // --- TILE ANIM ---
                 if(tile_anim_timer <= 0.0f) {
                     tile_anim_timer = tile_anime_interval;
                     
@@ -1170,6 +1188,32 @@ int main(void) {
                     }
                 }
                 tile_anim_timer -= delta;
+
+                // --- TRAINER BATTLE ---
+                col_box = player_collision_box();
+                for (int idx = 0; idx < npc_count; idx++) {
+                    NpcDef &npc = npcs[idx];
+                    
+                    if (npc.battled) continue;
+
+                    Vector2i tile_start = tile_from_world(npc.pos);
+                    Vector2i dir = vector2i_from_direction(npc.dir);
+                    Vector2i tile_end = tile_start + dir * 8;
+
+                    float dist = world_from_tile(distance(tile_start, tile_end));
+                    float half_thickness = tile_size_f * 0.5f;
+                    Rectangle trainer_hit_box = {
+                        npc.pos.x + (dir.x < 0 ? -dist : 0) - (dir.y != 0 ? half_thickness : 0),
+                        npc.pos.y + (dir.y < 0 ? -dist : 0) - (dir.x != 0 ? half_thickness : 0),
+                        (dir.x != 0) ? dist : tile_size_f,
+                        (dir.y != 0) ? dist : tile_size_f
+                    };
+
+                    if (rect_intersects(trainer_hit_box, col_box)) {
+                        enter_battle(false);
+                        npc.battled = true; // TODO Lars needs to update this after victory.
+                    }
+                }
 
                 break;
             }

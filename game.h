@@ -30,6 +30,24 @@ struct Vector2i {
 
 static inline bool operator==(Vector2i a, Vector2i b) { return (a.x == b.x) && (a.y == b.y); }
 static inline bool operator!=(Vector2i a, Vector2i b) { return !(a == b); }
+inline Vector2i operator+(Vector2i a, Vector2i b) {
+    return {
+        a.x + b.x,
+        a.y + b.y
+    };
+}
+inline Vector2i operator*(Vector2i v, int scalar) {
+    return {
+        v.x * scalar,
+        v.y * scalar
+    };
+}
+inline Vector2i operator*(int scalar, Vector2i v) {
+    return {
+        v.x * scalar,
+        v.y * scalar
+    };
+}
 
 enum class Npc {
     Nil,
@@ -140,6 +158,7 @@ struct NpcDef {
     Npc npc;
     Vector2 pos;
     EntityDirection dir; // Notice: All npcs are assumed to have all four directions
+    bool battled; 
 };
 
 enum class BattleUIIndex : uint32_t {
@@ -158,6 +177,7 @@ constexpr int default_screen_height = 800;
 constexpr int font_size_move = 32;
 constexpr int max_player_party = 6;
 constexpr int max_cocomons = 32;
+constexpr int max_npcs = 32;
 constexpr int world_width = 64;
 constexpr int world_height = 64;
 constexpr int tile_size_i = 32;
