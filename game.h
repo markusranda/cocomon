@@ -50,6 +50,8 @@ enum class Cocomon {
     COUNT,
 };
 
+constexpr int max_cocomon_moves = 4;
+
 struct CocomonMoveDef {
     char name[32];
     uint32_t pp;
@@ -61,12 +63,13 @@ struct CocomonMoveDef {
 
 struct CocomonDef {
     char name[32];
+    CocomonElement element;
     int health;
     int max_health;
     int attack;
     int defense;
     int speed;
-    CocomonMoveDef moves[4];
+    CocomonMoveDef moves[max_cocomon_moves];
 };
 
 enum class PlayerAnimState {
