@@ -1,0 +1,3 @@
+C:/Users/Randa/projects/cocomon/build/CMakeFiles/cocomon.dir
+C:/Users/Randa/projects/cocomon/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/Randa/projects/cocomon/build/CMakeFiles/ZERO_CHECK.dir

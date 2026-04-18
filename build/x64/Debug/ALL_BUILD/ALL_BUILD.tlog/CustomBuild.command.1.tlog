@@ -1,0 +1,10 @@
+^C:\USERS\RANDA\PROJECTS\COCOMON\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/Randa/projects/cocomon -BC:/Users/Randa/projects/cocomon/build --check-stamp-file C:/Users/Randa/projects/cocomon/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
