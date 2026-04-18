@@ -21,18 +21,17 @@ static inline void debug_break() {
 #endif
 }
 
-int screen_width = default_screen_width;
-int screen_height = default_screen_height;
-extern const Color color_surface_0 = Color{ 130, 130, 130, 250 };
-extern const Color color_surface_1 = Color{ 150, 150, 150, 250 };
-extern const Color color_surface_2 = Color{ 170, 170, 170, 250 };
-extern const Color color_surface_3 = Color{ 190, 190, 190, 250 };
-extern const Color color_primary   = Color{ 104, 185, 199, 250 };
-
 // =====================================================================================================================
 // STATE
 // =====================================================================================================================
 
+const Color color_surface_0 = Color{ 130, 130, 130, 250 };
+const Color color_surface_1 = Color{ 150, 150, 150, 250 };
+const Color color_surface_2 = Color{ 170, 170, 170, 250 };
+const Color color_surface_3 = Color{ 190, 190, 190, 250 };
+const Color color_primary   = Color{ 104, 185, 199, 250 };
+int screen_width = default_screen_width;
+int screen_height = default_screen_height;
 MoveKey key_stack[4];
 int key_count = 0;
 char cocomon_element_names[(size_t)CocomonElement::COUNT][32];
@@ -106,6 +105,9 @@ Cocomon battle_damage_popup_target = Cocomon::Nil;
 int battle_damage_popup_amount = 0;
 float battle_damage_popup_timer = 0.0f;
 float battle_damage_popup_duration = 0.0f;
+// --- TILE ANIM ---
+float tile_anim_timer = 0.0f;
+float tile_anime_interval = 0.25f;
 
 // =====================================================================================================================
 // METHODS
@@ -132,6 +134,10 @@ bool chance(float probability) {
     return ((float)rand() / ((float)RAND_MAX + 1.0f)) < probability;
 }
 
+int tile_from_world(float world) {
+    return (int)floorf(world / tile_size_f);
+}
+
 Vector2i tile_from_world(Vector2 world) {
     Vector2i result;
 
@@ -139,6 +145,10 @@ Vector2i tile_from_world(Vector2 world) {
     result.y = (int)floorf(world.y / tile_size_f);
 
     return result;
+}
+
+float world_from_tile(int tile) {
+    return tile * tile_size_f;
 }
 
 Vector2 world_from_tile(Vector2i tile) {
@@ -649,6 +659,112 @@ bool rect_intersects(Rectangle a, Rectangle b) {
            (a.y + a.height > b.y);
 }
 
+bool world_entity_blocks_movement(WorldEntity entity) {
+    switch(entity) {
+        case WorldEntity::Grass:
+        case WorldEntity::GrassTall:
+            return false;
+
+        case WorldEntity::WallGrassEnd:
+        case WorldEntity::WallGrassLine:
+        case WorldEntity::WallGrassBend:
+        case WorldEntity::WallGrassT:
+        case WorldEntity::WallGrassX:
+        case WorldEntity::Water:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+void move_and_resolve_player(Vector2 delta) {
+    // -------------------------------------------------------------------- 
+    // X AXIS 
+    // ----------------- --------------------------------------------------
+    player_pos.x += delta.x;
+
+    Rectangle box = player_collision_box();
+
+    float epsilon = 0.001f;
+    int left      = tile_from_world(box.x);
+    int right     = tile_from_world(box.x + box.width  - epsilon);
+    int top       = tile_from_world(box.y);
+    int bottom    = tile_from_world(box.y + box.height - epsilon);
+
+    if(top < 0) top = 0;
+    if(bottom >= world_height) bottom = world_height - 1;
+
+    if(delta.x > 0.0f) {
+        // moving right
+        if(right >= world_width) {
+            player_pos.x = world_from_tile(world_width) - box.width * 0.5f;
+        } else {
+            for(int y = top; y <= bottom; y++) {
+                if(world_entity_blocks_movement(world[y][right].entity)) {
+                    player_pos.x = world_from_tile(right) - box.width * 0.5f;
+                    break;
+                }
+            }
+        }
+    }
+    else if(delta.x < 0.0f) {
+        // moving left
+        if(left < 0) {
+            player_pos.x = box.width * 0.5f;
+        } else {
+            for(int y = top; y <= bottom; y++) {
+                if(world_entity_blocks_movement(world[y][left].entity)) {
+                    player_pos.x = world_from_tile(left + 1) + box.width * 0.5f;
+                    break;
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------- 
+    // Y AXIS
+    // ----------------- --------------------------------------------------
+    player_pos.y += delta.y;
+
+    box = player_collision_box();
+
+    left   = tile_from_world(box.x);
+    right  = tile_from_world(box.x + box.width  - epsilon);
+    top    = tile_from_world(box.y);
+    bottom = tile_from_world(box.y + box.height - epsilon);
+
+    if(left < 0) left = 0;
+    if(right >= world_width) right = world_width - 1;
+
+    if(delta.y > 0.0f) {
+        // moving down
+        if(bottom >= world_height) {
+            player_pos.y = world_from_tile(world_height);
+        } else {
+            for(int x = left; x <= right; x++) {
+                if(world_entity_blocks_movement(world[bottom][x].entity)) {
+                    player_pos.y = world_from_tile(bottom);
+                    break;
+                }
+            }
+        }
+    }
+    else if(delta.y < 0.0f) {
+        // moving up
+        if(top < 0) {
+            player_pos.y = box.height;
+        } else {
+            for(int x = left; x <= right; x++) {
+                if(world_entity_blocks_movement(world[top][x].entity)) {
+                    player_pos.y = world_from_tile(top + 1) + box.height;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 // =====================================================================================================================
 // MAIN
 // =====================================================================================================================
@@ -678,6 +794,7 @@ int main(void) {
     tex_world_entities[(size_t)WorldEntity::WallGrassBend] = LoadTexture("sprites/wall_grass_bend.png");
     tex_world_entities[(size_t)WorldEntity::WallGrassT]    = LoadTexture("sprites/wall_grass_t.png");
     tex_world_entities[(size_t)WorldEntity::WallGrassX]    = LoadTexture("sprites/wall_grass_x.png");
+    tex_world_entities[(size_t)WorldEntity::Water]         = LoadTexture("sprites/water_tile.png");
 
     strcpy(cocomon_element_names[(size_t)CocomonElement::Grass], "GRASS");
     strcpy(cocomon_element_names[(size_t)CocomonElement::Fire], "FIRE");
@@ -733,6 +850,25 @@ int main(void) {
             world[y + 10][x + 10] = { WorldEntity::GrassTall, 0.0f };
         }
     }
+
+    int lake_y = 18;
+    int lake_x = 36;
+    for(int x = 9;  x <= 14; x++) world[lake_y + 0][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 6;  x <= 17; x++) world[lake_y + 1][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 4;  x <= 19; x++) world[lake_y + 2][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 3;  x <= 20; x++) world[lake_y + 3][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 2;  x <= 21; x++) world[lake_y + 4][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 1;  x <= 22; x++) world[lake_y + 5][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 1;  x <= 22; x++) world[lake_y + 6][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 0;  x <= 23; x++) world[lake_y + 7][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 0;  x <= 23; x++) world[lake_y + 8][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 1;  x <= 22; x++) world[lake_y + 9][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 1;  x <= 21; x++) world[lake_y +10][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 2;  x <= 20; x++) world[lake_y +11][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 3;  x <= 18; x++) world[lake_y +12][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 4;  x <= 16; x++) world[lake_y +13][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 6;  x <= 13; x++) world[lake_y +14][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
+    for(int x = 8;  x <= 11; x++) world[lake_y +15][lake_x + x] = { WorldEntity::Water, 0.0f, 4, 0 };
     
     for (int x = 1; x < world_width - 1; x++) world[0][x] = { WorldEntity::WallGrassLine, 90.0f };
     for (int x = 1; x < world_width - 1; x++) world[world_height - 1][x] = { WorldEntity::WallGrassLine, 90.0f };
@@ -798,22 +934,10 @@ int main(void) {
                 player_pos.y += float(move_y * player_speed) * delta;
                 
                 // --- PLAYER COLLISION ---
-                Rectangle col_box = player_collision_box(); 
-                float half_width  = col_box.width * 0.5f;
-                float max_x = world_width * tile_size_f - tile_size_f;
-                float max_y = world_height * tile_size_f - tile_size_f;
-                if (col_box.x < tile_size_f)
-                    player_pos.x = tile_size_f + half_width;
+                Vector2 move_delta = player_pos - player_prev_pos;
+                move_and_resolve_player(move_delta);
 
-                if (col_box.y < tile_size_f)
-                    player_pos.y = tile_size_f + col_box.height;
-
-                if (col_box.x + col_box.width > max_x)
-                    player_pos.x = max_x - half_width;
-
-                if (col_box.y + col_box.height > max_y)
-                    player_pos.y = max_y;
-
+                Rectangle col_box = player_collision_box();
                 bool moving = move_x != 0.0f || move_y != 0.0f;
                 bool standing_in_tall_grass = false;
                 for(int y = 0; y < world_height; y++) {
@@ -862,6 +986,25 @@ int main(void) {
                     player_anim_timer = 0.0f;
                     player_frame = (player_frame + 1) % player_frames_per_row;
                 }
+
+                // ANIMATE TILES
+                if(tile_anim_timer <= 0.0f) {
+                    tile_anim_timer = tile_anime_interval;
+                    
+                    for(int y = 0; y < world_height; y++) {
+                        for(int x = 0; x < world_width; x++) {
+                            WorldEntityDef* world_entity = &world[y][x];
+                            
+                            if(world_entity->frame_count > 1) {
+                                world_entity->frame_index++;
+                                if(world_entity->frame_index >= world_entity->frame_count) {
+                                    world_entity->frame_index = 0;
+                                }
+                            }
+                        }
+                    }
+                }
+                tile_anim_timer -= delta;
 
                 break;
             }
@@ -935,7 +1078,7 @@ int main(void) {
 
                         WorldEntityDef world_entity = world[y][x];
                         Texture2D tex = tex_world_entities[(size_t)world_entity.entity];
-                        Rectangle src = { 0.0f, 0.0f, tile_size_f, tile_size_f };
+                        Rectangle src = { world_entity.frame_index * tile_size_f, 0.0f, tile_size_f, tile_size_f };
                         Rectangle dst = { (float)world_x + tile_size_f * 0.5f, (float)world_y + tile_size_f * 0.5f, tile_size_f, tile_size_f };
                         Vector2 origin = { tile_size_f * 0.5f, tile_size_f * 0.5f };
 

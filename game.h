@@ -4,6 +4,25 @@
 #include <cstddef>
 #include <cstdint>
 
+// OVERLOADS
+inline Vector2 operator*(float scalar, Vector2 v) { return { v.x * scalar, v.y * scalar }; }
+inline Vector2 operator*(Vector2 v, float scalar) { return { v.x * scalar, v.y * scalar }; }
+inline Vector2 operator/(Vector2 v, float scalar) { return { v.x / scalar, v.y / scalar }; }
+inline Vector2 operator+(Vector2 a, Vector2 b) { return { a.x + b.x, a.y + b.y }; }
+inline Vector2 operator+(Vector2 a, float b) { return { a.x + b, a.y + b }; }
+inline Vector2 operator-(Vector2 a, float b) { return { a.x - b, a.y - b }; }
+inline Vector2 operator-(Vector2 a, Vector2 b) { return { a.x - b.x, a.y - b.y }; }
+inline Vector2& operator+=(Vector2& a, Vector2 b) { 
+    a.x += b.x;
+    a.y += b.y;
+    return a;
+}
+inline Vector2& operator-=(Vector2& a, Vector2 b) {
+    a.x -= b.x;
+    a.y -= b.y;
+    return a;
+}
+
 struct Vector2i {
     int x;
     int y;
@@ -91,12 +110,15 @@ enum class WorldEntity {
     WallGrassBend,
     WallGrassT,
     WallGrassX,
+    Water,
     COUNT,
 };
 
 struct WorldEntityDef {
     WorldEntity entity;
     float       rot;
+    int         frame_count;
+    int         frame_index;
 };
 
 enum class BattleUIIndex : uint32_t {
