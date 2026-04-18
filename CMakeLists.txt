@@ -9,34 +9,77 @@ project(cocomon LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(cocomon main.cpp)
+add_executable(cocomon
+    main.cpp
+    battle.cpp
+)
 
 target_include_directories(cocomon PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
-target_link_directories(cocomon PRIVATE
-    ${CMAKE_SOURCE_DIR}/lib
-)
+if (WIN32)
+    target_link_directories(cocomon PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib
+    )
 
-target_link_libraries(cocomon PRIVATE
-    raylib
-    gdi32
-    winmm
-    user32
-    shell32
-)
+    target_link_libraries(cocomon PRIVATE
+        raylib
+        gdi32
+        winmm
+        user32
+        shell32
+    )
+elseif(APPLE)
+    find_library(RAYLIB_LIBRARY raylib)
+
+    if (NOT RAYLIB_LIBRARY)
+        message(FATAL_ERROR
+            "raylib was not found on this Mac. Install a macOS build of raylib, then re-run CMake."
+        )
+    endif()
+
+    target_link_libraries(cocomon PRIVATE
+        ${RAYLIB_LIBRARY}
+        "-framework Cocoa"
+        "-framework IOKit"
+        "-framework CoreVideo"
+    )
+else()
+    find_library(RAYLIB_LIBRARY raylib)
+
+    if (NOT RAYLIB_LIBRARY)
+        message(FATAL_ERROR
+            "raylib was not found on this system. Install raylib, then re-run CMake."
+        )
+    endif()
+
+    target_link_libraries(cocomon PRIVATE
+        ${RAYLIB_LIBRARY}
+        m
+        pthread
+        dl
+        rt
+        X11
+    )
+endif()
 
 # ----------------------------
 # Tracy (Debug only)
 # ----------------------------
 set(TRACY_DIR "${CMAKE_SOURCE_DIR}/../tracy")
-target_include_directories(cocomon SYSTEM PRIVATE
-    $<$<CONFIG:Debug>:${TRACY_DIR}/public>
-)
-target_sources(cocomon PRIVATE
-    $<$<CONFIG:Debug>:${TRACY_DIR}/public/TracyClient.cpp>
-)
-target_compile_definitions(cocomon PRIVATE
-    $<$<CONFIG:Debug>:TRACY_ENABLE>
-)
+set(TRACY_CLIENT_CPP "${TRACY_DIR}/public/TracyClient.cpp")
+
+if (EXISTS "${TRACY_CLIENT_CPP}")
+    target_include_directories(cocomon SYSTEM PRIVATE
+        $<$<CONFIG:Debug>:${TRACY_DIR}/public>
+    )
+    target_sources(cocomon PRIVATE
+        $<$<CONFIG:Debug>:${TRACY_CLIENT_CPP}>
+    )
+    target_compile_definitions(cocomon PRIVATE
+        $<$<CONFIG:Debug>:TRACY_ENABLE>
+    )
+else()
+    message(STATUS "Tracy not found at ${TRACY_CLIENT_CPP}; building without Tracy profiling support")
+endif()
