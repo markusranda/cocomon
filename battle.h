@@ -24,6 +24,15 @@ enum class FinishReason {
     PlayerWon,
     OpponentWon,
     PlayerRanAway,
+    PlayerCapturedOpponent,
+};
+
+enum class CaptureOutcome {
+    None,
+    BlockedNotWild,
+    BlockedPartyFull,
+    Failed,
+    Caught,
 };
 
 enum class Effectiveness {
@@ -35,7 +44,9 @@ enum class Effectiveness {
 struct MoveEvent {
     bool happened = false;
     Cocomon attacker = Cocomon::Nil;
+    bool attacker_is_player = false;
     Cocomon defender = Cocomon::Nil;
+    bool defender_is_player = false;
     int move_slot = -1;
     int damage = 0;
     int defender_health_after = 0;
@@ -48,6 +59,13 @@ struct MoveEvent {
 struct TurnResult {
     Action action = {};
     bool action_resolved = false;
+    bool player_switched = false;
+    bool party_switch_required = false;
+    CaptureOutcome capture_outcome = CaptureOutcome::None;
+    Cocomon captured_species = Cocomon::Nil;
+    int captured_party_slot = -1;
+    Cocomon switched_from = Cocomon::Nil;
+    Cocomon switched_to = Cocomon::Nil;
     MoveEvent first_move = {};
     MoveEvent second_move = {};
     FinishReason finish_reason = FinishReason::None;
@@ -56,5 +74,6 @@ struct TurnResult {
 void start();
 Action action_from_ui(BattleUIIndex selected_index);
 TurnResult resolve_player_action(Action action);
+TurnResult resolve_player_switch(int party_slot, bool forced_switch);
 
 } // namespace battle

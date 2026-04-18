@@ -27,6 +27,7 @@ static inline void debug_break() {
 
 float world_from_tile(int tile);
 Vector2 world_from_tile(Vector2i tile);
+void open_cocomon_list(GameState return_state, bool forced_selection);
 
 // =====================================================================================================================
 // STATE
@@ -49,11 +50,13 @@ Texture2D tex_cocomon_fronts[max_cocomons];
 Texture2D tex_cocomon_backs[max_cocomons];
 Texture2D tex_npc[(size_t)Npc::COUNT];
 Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
-Cocomon player_party[max_player_party];
+CocomonInstance player_party[max_player_party];
 int player_party_count = 0;
 int player_active_party_slot = 0;
+CocomonInstance battle_opponent_cocomon = {};
 Cocomon player_cocomon_idx = Cocomon::LocoMoco;
 Cocomon opponent_cocomon_idx = Cocomon::FrickaFlow;
+bool battle_is_wild_encounter = false;
 GameState game_state = GameState::Overworld;
 GameState game_state_next = GameState::Overworld;
 uint32_t ui_cursor = 0; // Each scene understands what this means.
@@ -92,13 +95,21 @@ float encounter_timer = 0.0f;
 float encounter_interval = 1.0f;
 
 // --- BATTLE PRESENTATION ---
-constexpr int battle_playback_capacity = 12;
+constexpr int battle_playback_capacity = 24;
 constexpr int battle_caption_max_chars = 96;
+enum class BattleVisualSide {
+    None,
+    Player,
+    Opponent,
+};
+
 struct BattleBeat {
     char caption[battle_caption_max_chars];
     float duration;
     Cocomon attacker;
+    bool attacker_is_player;
     Cocomon defender;
+    bool defender_is_player;
     int damage;
     int defender_health_after;
     bool trigger_attack;
@@ -116,13 +127,18 @@ float battle_player_health_display = 0.0f;
 float battle_player_health_target = 0.0f;
 float battle_opponent_health_display = 0.0f;
 float battle_opponent_health_target = 0.0f;
-Cocomon battle_animating_attacker = Cocomon::Nil;
+BattleVisualSide battle_animating_attack_side = BattleVisualSide::None;
 float battle_attack_anim_timer = 0.0f;
 float battle_attack_anim_duration = 0.0f;
-Cocomon battle_damage_popup_target = Cocomon::Nil;
+BattleVisualSide battle_damage_popup_side = BattleVisualSide::None;
 int battle_damage_popup_amount = 0;
 float battle_damage_popup_timer = 0.0f;
 float battle_damage_popup_duration = 0.0f;
+bool battle_pending_open_party_menu = false;
+bool battle_pending_forced_party_menu = false;
+bool battle_pending_party_heal_on_finish = false;
+GameState cocomon_list_return_state = GameState::Overworld;
+bool cocomon_list_forced_selection = false;
 // --- TILE ANIM ---
 float tile_anim_timer = 0.0f;
 float tile_anime_interval = 0.25f;
@@ -178,8 +194,90 @@ Vector2 world_from_tile(Vector2i tile) {
     return result;
 }
 
+bool cocomon_instance_is_valid(const CocomonInstance& instance) {
+    return instance.species != Cocomon::Nil;
+}
+
+bool cocomon_instance_can_battle(const CocomonInstance& instance) {
+    return cocomon_instance_is_valid(instance) && instance.battler.health > 0;
+}
+
+CocomonDef scaled_cocomon_def(Cocomon species, int level) {
+    CocomonDef result = cocomon_defaults[(size_t)species];
+    int level_offset = level - 1;
+    if (level_offset < 0) level_offset = 0;
+
+    result.max_health += level_offset * 8;
+    result.health = result.max_health;
+    result.attack += level_offset * 2;
+    result.defense += level_offset * 2;
+    result.speed += level_offset;
+
+    for (int move_slot = 0; move_slot < max_cocomon_moves; move_slot++) {
+        if (result.moves[move_slot].flags > 0) {
+            result.moves[move_slot].pp = result.moves[move_slot].pp_max;
+        }
+    }
+
+    return result;
+}
+
+void refresh_cocomon_instance_stats(CocomonInstance& instance, bool full_heal = false) {
+    if (!cocomon_instance_is_valid(instance)) return;
+
+    int previous_max_health = instance.battler.max_health;
+    int previous_health = instance.battler.health;
+    CocomonMoveDef previous_moves[max_cocomon_moves] = {};
+    for (int move_slot = 0; move_slot < max_cocomon_moves; move_slot++) {
+        previous_moves[move_slot] = instance.battler.moves[move_slot];
+    }
+
+    instance.battler = scaled_cocomon_def(instance.species, instance.level);
+
+    if (!full_heal && previous_max_health > 0) {
+        int health_gain = instance.battler.max_health - previous_max_health;
+        instance.battler.health = previous_health + health_gain;
+        if (instance.battler.health < 0) instance.battler.health = 0;
+        if (instance.battler.health > instance.battler.max_health) instance.battler.health = instance.battler.max_health;
+    }
+
+    for (int move_slot = 0; move_slot < max_cocomon_moves; move_slot++) {
+        if (instance.battler.moves[move_slot].flags == 0) continue;
+        if (full_heal) continue;
+
+        instance.battler.moves[move_slot].pp = previous_moves[move_slot].pp;
+        if (instance.battler.moves[move_slot].pp > instance.battler.moves[move_slot].pp_max) {
+            instance.battler.moves[move_slot].pp = instance.battler.moves[move_slot].pp_max;
+        }
+        if ((int)instance.battler.moves[move_slot].pp < 0) {
+            instance.battler.moves[move_slot].pp = 0;
+        }
+    }
+}
+
+CocomonInstance make_cocomon_instance(Cocomon species, int level) {
+    CocomonInstance instance = {};
+    instance.species = species;
+    instance.level = level;
+    instance.xp = 0;
+    instance.battler = scaled_cocomon_def(species, level);
+    return instance;
+}
+
+void restore_cocomon_instance(CocomonInstance& instance) {
+    refresh_cocomon_instance_stats(instance, true);
+}
+
+int experience_to_next_level(int level) {
+    return 50 + (level - 1) * 25;
+}
+
 bool player_party_slot_is_valid(int slot) {
-    return slot >= 0 && slot < player_party_count && player_party[slot] != Cocomon::Nil;
+    return slot >= 0 && slot < player_party_count && cocomon_instance_is_valid(player_party[slot]);
+}
+
+bool player_party_slot_can_battle(int slot) {
+    return player_party_slot_is_valid(slot) && cocomon_instance_can_battle(player_party[slot]);
 }
 
 int first_valid_player_party_slot() {
@@ -190,13 +288,32 @@ int first_valid_player_party_slot() {
     return 0;
 }
 
+int first_usable_player_party_slot() {
+    for (int slot = 0; slot < player_party_count; slot++) {
+        if (player_party_slot_can_battle(slot)) return slot;
+    }
+
+    return first_valid_player_party_slot();
+}
+
+int first_switchable_player_party_slot() {
+    for (int slot = 0; slot < player_party_count; slot++) {
+        if (slot == player_active_party_slot) continue;
+        if (player_party_slot_can_battle(slot)) return slot;
+    }
+
+    return player_active_party_slot;
+}
+
 void sync_player_active_cocomon_from_party() {
-    if (!player_party_slot_is_valid(player_active_party_slot)) {
+    if (!player_party_slot_can_battle(player_active_party_slot)) {
+        player_active_party_slot = first_usable_player_party_slot();
+    } else if (!player_party_slot_is_valid(player_active_party_slot)) {
         player_active_party_slot = first_valid_player_party_slot();
     }
 
     if (player_party_slot_is_valid(player_active_party_slot)) {
-        player_cocomon_idx = player_party[player_active_party_slot];
+        player_cocomon_idx = player_party[player_active_party_slot].species;
     }
 }
 
@@ -204,18 +321,13 @@ void set_player_active_party_slot(int slot) {
     if (!player_party_slot_is_valid(slot)) return;
 
     player_active_party_slot = slot;
-    player_cocomon_idx = player_party[slot];
+    player_cocomon_idx = player_party[slot].species;
 }
 
-void cycle_player_party_member() {
-    if (player_party_count <= 1) return;
-
-    for (int offset = 1; offset <= player_party_count; offset++) {
-        int candidate = (player_active_party_slot + offset) % player_party_count;
-        if (player_party_slot_is_valid(candidate)) {
-            set_player_active_party_slot(candidate);
-            return;
-        }
+void heal_player_party_full() {
+    for (int slot = 0; slot < player_party_count; slot++) {
+        if (!player_party_slot_is_valid(slot)) continue;
+        restore_cocomon_instance(player_party[slot]);
     }
 }
 
@@ -225,14 +337,35 @@ Cocomon random_wild_encounter_cocomon() {
         Cocomon::Molly,
         Cocomon::LocoMoco,
         Cocomon::Jokko,
+        Cocomon::WakaCaca,
     };
     int encounter_count = (int)(sizeof(encounters) / sizeof(encounters[0]));
     return encounters[rand() % encounter_count];
 }
 
+int random_wild_encounter_level() {
+    int base_level = 3;
+    if (player_party_slot_is_valid(player_active_party_slot)) {
+        base_level = player_party[player_active_party_slot].level;
+    }
+
+    int level = base_level - 1 + (rand() % 3);
+    if (level < 1) level = 1;
+    return level;
+}
+
 void prepare_random_encounter() {
     sync_player_active_cocomon_from_party();
-    opponent_cocomon_idx = random_wild_encounter_cocomon();
+    battle_opponent_cocomon = make_cocomon_instance(random_wild_encounter_cocomon(), random_wild_encounter_level());
+    opponent_cocomon_idx = battle_opponent_cocomon.species;
+}
+
+CocomonInstance& active_player_cocomon() {
+    return player_party[player_active_party_slot];
+}
+
+CocomonInstance& active_opponent_cocomon() {
+    return battle_opponent_cocomon;
 }
 
 Rectangle ui_draw_cocomon_box(int x, int y, const CocomonDef& cocomon, float displayed_health = -1.0f) {
@@ -290,7 +423,7 @@ void ui_draw_action_bar_move(int x, int y, int cell_width, int cell_height, bool
 void ui_draw_action_bar_moves(int x, int y, int width, int height) {
     DrawRectangle(x, y, width, height, color_surface_1);
 
-    CocomonDef cocomon = cocomons[(size_t)player_cocomon_idx];
+    CocomonDef cocomon = active_player_cocomon().battler;
     
     // Grid setup
     int gap = 10;
@@ -422,19 +555,22 @@ void battle_clear_playback() {
     battle_active_caption_timer = 0.0f;
     battle_active_caption_duration = 0.0f;
     battle_pending_finish_reason = battle::FinishReason::None;
-    battle_animating_attacker = Cocomon::Nil;
+    battle_animating_attack_side = BattleVisualSide::None;
     battle_attack_anim_timer = 0.0f;
     battle_attack_anim_duration = 0.0f;
-    battle_damage_popup_target = Cocomon::Nil;
+    battle_damage_popup_side = BattleVisualSide::None;
     battle_damage_popup_amount = 0;
     battle_damage_popup_timer = 0.0f;
     battle_damage_popup_duration = 0.0f;
+    battle_pending_open_party_menu = false;
+    battle_pending_forced_party_menu = false;
+    battle_pending_party_heal_on_finish = false;
 }
 
 void battle_reset_health_display() {
-    battle_player_health_display = (float)cocomons[(size_t)player_cocomon_idx].health;
+    battle_player_health_display = (float)active_player_cocomon().battler.health;
     battle_player_health_target = battle_player_health_display;
-    battle_opponent_health_display = (float)cocomons[(size_t)opponent_cocomon_idx].health;
+    battle_opponent_health_display = (float)active_opponent_cocomon().battler.health;
     battle_opponent_health_target = battle_opponent_health_display;
 }
 
@@ -446,7 +582,7 @@ bool battle_has_active_caption() {
     return battle_active_caption_timer > 0.0f && battle_active_caption[0] != '\0';
 }
 
-void battle_push_beat(const char* caption, float duration, Cocomon attacker = Cocomon::Nil, Cocomon defender = Cocomon::Nil, int damage = 0, int defender_health_after = -1, bool trigger_attack = false) {
+void battle_push_beat(const char* caption, float duration, Cocomon attacker = Cocomon::Nil, bool attacker_is_player = false, Cocomon defender = Cocomon::Nil, bool defender_is_player = false, int damage = 0, int defender_health_after = -1, bool trigger_attack = false) {
     if (battle_beat_count >= battle_playback_capacity) return;
 
     BattleBeat& beat = battle_beats[battle_beat_count];
@@ -455,7 +591,9 @@ void battle_push_beat(const char* caption, float duration, Cocomon attacker = Co
     beat.caption[battle_caption_max_chars - 1] = '\0';
     beat.duration = duration;
     beat.attacker = attacker;
+    beat.attacker_is_player = attacker_is_player;
     beat.defender = defender;
+    beat.defender_is_player = defender_is_player;
     beat.damage = damage;
     beat.defender_health_after = defender_health_after;
     beat.trigger_attack = trigger_attack;
@@ -471,7 +609,7 @@ void battle_push_move_beat(const battle::MoveEvent& move_event) {
     char caption[battle_caption_max_chars];
 
     snprintf(caption, sizeof(caption), "%s used %s!", attacker.name, move.name);
-    battle_push_beat(caption, 0.75f, move_event.attacker, move_event.defender, move_event.damage, move_event.defender_health_after, true);
+    battle_push_beat(caption, 0.75f, move_event.attacker, move_event.attacker_is_player, move_event.defender, move_event.defender_is_player, move_event.damage, move_event.defender_health_after, true);
 
     switch (move_event.effectiveness) {
         case battle::Effectiveness::SuperEffective: {
@@ -493,37 +631,113 @@ void battle_push_move_beat(const battle::MoveEvent& move_event) {
     }
 }
 
+void battle_push_switch_beat(const battle::TurnResult& result) {
+    if (!result.player_switched) return;
+
+    char caption[battle_caption_max_chars];
+    const CocomonDef& switched_to = cocomons[(size_t)result.switched_to];
+    snprintf(caption, sizeof(caption), "Go, %s!", switched_to.name);
+    battle_push_beat(caption, 0.7f);
+}
+
+void battle_push_cocoball_beats(const battle::TurnResult& result) {
+    if (result.action.type != battle::ActionType::ThrowCocoball) return;
+
+    char caption[battle_caption_max_chars];
+    const char* captured_name = cocomons[(size_t)result.captured_species].name;
+
+    switch (result.capture_outcome) {
+        case battle::CaptureOutcome::BlockedNotWild: {
+            battle_push_beat("You can only catch wild Cocomon.", 0.85f);
+            break;
+        }
+        case battle::CaptureOutcome::BlockedPartyFull: {
+            battle_push_beat("Your party is full.", 0.75f);
+            break;
+        }
+        case battle::CaptureOutcome::Failed: {
+            battle_push_beat("You threw a Cocoball!", 0.55f);
+            snprintf(caption, sizeof(caption), "%s broke free!", captured_name);
+            battle_push_beat(caption, 0.8f);
+            break;
+        }
+        case battle::CaptureOutcome::Caught: {
+            battle_push_beat("You threw a Cocoball!", 0.55f);
+            snprintf(caption, sizeof(caption), "Gotcha! %s was caught!", captured_name);
+            battle_push_beat(caption, 0.9f);
+            snprintf(caption, sizeof(caption), "%s joined your party!", captured_name);
+            battle_push_beat(caption, 0.85f);
+            break;
+        }
+        case battle::CaptureOutcome::None: {
+            break;
+        }
+    }
+}
+
+void battle_award_victory_experience() {
+    CocomonInstance& player = active_player_cocomon();
+    const CocomonInstance& opponent = active_opponent_cocomon();
+    char caption[battle_caption_max_chars];
+    int experience_gained = 25 + opponent.level * 15;
+
+    snprintf(caption, sizeof(caption), "%s gained %d XP!", player.battler.name, experience_gained);
+    battle_push_beat(caption, 0.9f);
+
+    player.xp += experience_gained;
+    while (player.xp >= experience_to_next_level(player.level)) {
+        player.xp -= experience_to_next_level(player.level);
+        player.level += 1;
+        refresh_cocomon_instance_stats(player);
+        player_cocomon_idx = player.species;
+        battle_player_health_target = (float)player.battler.health;
+        battle_player_health_display = battle_player_health_target;
+
+        snprintf(caption, sizeof(caption), "%s reached LV %d!", player.battler.name, player.level);
+        battle_push_beat(caption, 0.9f);
+    }
+}
+
 void battle_queue_turn_result_playback(const battle::TurnResult& result) {
     battle_clear_playback();
     battle_pending_finish_reason = result.finish_reason;
+    battle_pending_open_party_menu = result.party_switch_required;
+    battle_pending_forced_party_menu = result.party_switch_required;
+    battle_pending_party_heal_on_finish = result.finish_reason == battle::FinishReason::OpponentWon;
 
-    if (!result.action_resolved) {
+    if (result.player_switched) {
+        battle_player_health_display = (float)active_player_cocomon().battler.health;
+        battle_player_health_target = battle_player_health_display;
+    }
+
+    if (result.action.type == battle::ActionType::ThrowCocoball) {
+        battle_push_cocoball_beats(result);
+    } else if (!result.action_resolved) {
         switch (result.action.type) {
             case battle::ActionType::UseMove: {
                 battle_push_beat("That move can't be used.", 0.8f);
                 break;
             }
             case battle::ActionType::OpenCocomonMenu: {
-                battle_push_beat("Cocomon switching isn't ready yet.", 0.85f);
-                break;
-            }
-            case battle::ActionType::ThrowCocoball: {
-                battle_push_beat("Cocoballs aren't ready yet.", 0.8f);
+                battle_push_beat("No other Cocomon can battle.", 0.85f);
                 break;
             }
             case battle::ActionType::RunAway:
+            case battle::ActionType::ThrowCocoball:
             case battle::ActionType::None: {
                 break;
             }
         }
     }
 
+    battle_push_switch_beat(result);
     battle_push_move_beat(result.first_move);
     battle_push_move_beat(result.second_move);
 
     switch (result.finish_reason) {
         case battle::FinishReason::PlayerWon: {
             battle_push_beat("You won the battle!", 0.9f);
+            battle_award_victory_experience();
             break;
         }
         case battle::FinishReason::OpponentWon: {
@@ -532,6 +746,9 @@ void battle_queue_turn_result_playback(const battle::TurnResult& result) {
         }
         case battle::FinishReason::PlayerRanAway: {
             battle_push_beat("You ran away!", 0.7f);
+            break;
+        }
+        case battle::FinishReason::PlayerCapturedOpponent: {
             break;
         }
         case battle::FinishReason::None: {
@@ -574,13 +791,42 @@ void remove_move_key(MoveKey key) {
 void state_transition_overworld() {
     game_state_next = GameState::Overworld;
     battle_clear_playback();
+    battle_pending_open_party_menu = false;
+    battle_pending_forced_party_menu = false;
+    battle_pending_party_heal_on_finish = false;
+    battle_is_wild_encounter = false;
     reset_keys();
     stop_current_music();
 }
 
+void open_cocomon_list(GameState return_state, bool forced_selection) {
+    cocomon_list_return_state = return_state;
+    cocomon_list_forced_selection = forced_selection;
+    int selected_slot = player_active_party_slot;
+    if (return_state == GameState::Battle) {
+        selected_slot = first_switchable_player_party_slot();
+    }
+    if (forced_selection && !player_party_slot_can_battle(selected_slot)) {
+        selected_slot = first_usable_player_party_slot();
+    }
+    ui_cursor = (uint32_t)selected_slot;
+    game_state_next = GameState::CocomonList;
+}
+
 void battle_start_next_beat() {
     if (battle_beat_index >= battle_beat_count) {
+        if (battle_pending_open_party_menu) {
+            bool forced_selection = battle_pending_forced_party_menu;
+            battle_pending_open_party_menu = false;
+            battle_pending_forced_party_menu = false;
+            open_cocomon_list(GameState::Battle, forced_selection);
+            return;
+        }
+
         if (battle_pending_finish_reason != battle::FinishReason::None) {
+            if (battle_pending_party_heal_on_finish) {
+                heal_player_party_full();
+            }
             state_transition_overworld();
         }
         return;
@@ -596,22 +842,22 @@ void battle_start_next_beat() {
     battle_active_caption_duration = beat.duration;
 
     if (beat.trigger_attack && beat.attacker != Cocomon::Nil) {
-        battle_animating_attacker = beat.attacker;
+        battle_animating_attack_side = beat.attacker_is_player ? BattleVisualSide::Player : BattleVisualSide::Opponent;
         battle_attack_anim_duration = beat.duration < 0.35f ? beat.duration : 0.35f;
         battle_attack_anim_timer = battle_attack_anim_duration;
     }
 
     if (beat.damage > 0 && beat.defender != Cocomon::Nil) {
-        battle_damage_popup_target = beat.defender;
+        battle_damage_popup_side = beat.defender_is_player ? BattleVisualSide::Player : BattleVisualSide::Opponent;
         battle_damage_popup_amount = beat.damage;
         battle_damage_popup_duration = beat.duration < 0.5f ? beat.duration : 0.5f;
         battle_damage_popup_timer = battle_damage_popup_duration;
     }
 
-    if (beat.defender != Cocomon::Nil && beat.defender_health_after >= 0) {
-        if (beat.defender == player_cocomon_idx) {
+    if (beat.defender_health_after >= 0) {
+        if (beat.defender_is_player) {
             battle_player_health_target = (float)beat.defender_health_after;
-        } else if (beat.defender == opponent_cocomon_idx) {
+        } else {
             battle_opponent_health_target = (float)beat.defender_health_after;
         }
     }
@@ -631,7 +877,7 @@ void battle_update_playback(float delta) {
         battle_attack_anim_timer -= (float)delta;
         if (battle_attack_anim_timer <= 0.0f) {
             battle_attack_anim_timer = 0.0f;
-            battle_animating_attacker = Cocomon::Nil;
+            battle_animating_attack_side = BattleVisualSide::None;
         }
     }
 
@@ -639,7 +885,7 @@ void battle_update_playback(float delta) {
         battle_damage_popup_timer -= (float)delta;
         if (battle_damage_popup_timer <= 0.0f) {
             battle_damage_popup_timer = 0.0f;
-            battle_damage_popup_target = Cocomon::Nil;
+            battle_damage_popup_side = BattleVisualSide::None;
             battle_damage_popup_amount = 0;
         }
     }
@@ -654,21 +900,54 @@ void battle_update_playback(float delta) {
         return;
     }
 
+    if (battle_pending_open_party_menu) {
+        bool forced_selection = battle_pending_forced_party_menu;
+        battle_pending_open_party_menu = false;
+        battle_pending_forced_party_menu = false;
+        open_cocomon_list(GameState::Battle, forced_selection);
+        return;
+    }
+
     if (battle_pending_finish_reason != battle::FinishReason::None) {
+        if (battle_pending_party_heal_on_finish) {
+            heal_player_party_full();
+        }
         state_transition_overworld();
     }
 }
 
+void battle_queue_intro_playback() {
+    char caption[battle_caption_max_chars];
+
+    if (battle_is_wild_encounter) {
+        snprintf(caption, sizeof(caption), "A wild %s appeared!", active_opponent_cocomon().battler.name);
+    } else {
+        snprintf(caption, sizeof(caption), "%s wants to battle!", active_opponent_cocomon().battler.name);
+    }
+    battle_push_beat(caption, 0.9f);
+
+    snprintf(caption, sizeof(caption), "Go, %s!", active_player_cocomon().battler.name);
+    battle_push_beat(caption, 0.75f);
+}
+
 void enter_battle(bool random_wild_encounter = false) {
+    battle_is_wild_encounter = random_wild_encounter;
     if (random_wild_encounter) {
         prepare_random_encounter();
     } else {
         sync_player_active_cocomon_from_party();
+        if (!cocomon_instance_can_battle(battle_opponent_cocomon)) {
+            battle_opponent_cocomon = make_cocomon_instance(opponent_cocomon_idx, active_player_cocomon().level);
+        }
     }
 
     battle::start();
     battle_clear_playback();
     battle_reset_health_display();
+    battle_queue_intro_playback();
+    if (battle_beat_count > 0) {
+        battle_start_next_beat();
+    }
 }
 
 float battle_caption_alpha() {
@@ -682,17 +961,17 @@ float battle_caption_alpha() {
     return fade_in < fade_out ? fade_in : fade_out;
 }
 
-Vector2 battle_attack_offset(Cocomon attacker) {
-    if (attacker != battle_animating_attacker || battle_attack_anim_duration <= 0.0f) return {};
+Vector2 battle_attack_offset(BattleVisualSide side) {
+    if (side != battle_animating_attack_side || battle_attack_anim_duration <= 0.0f) return {};
 
     float progress = 1.0f - (battle_attack_anim_timer / battle_attack_anim_duration);
     float swing = sinf(progress * 3.14159265f);
 
-    if (attacker == player_cocomon_idx) {
+    if (side == BattleVisualSide::Player) {
         return Vector2{ swing * 28.0f, -swing * 12.0f };
     }
 
-    if (attacker == opponent_cocomon_idx) {
+    if (side == BattleVisualSide::Opponent) {
         return Vector2{ -swing * 28.0f, swing * 12.0f };
     }
 
@@ -700,7 +979,7 @@ Vector2 battle_attack_offset(Cocomon attacker) {
 }
 
 void ui_draw_battle_damage_popup(int action_box_y) {
-    if (battle_damage_popup_timer <= 0.0f || battle_damage_popup_target == Cocomon::Nil || battle_damage_popup_amount <= 0) return;
+    if (battle_damage_popup_timer <= 0.0f || battle_damage_popup_side == BattleVisualSide::None || battle_damage_popup_amount <= 0) return;
 
     float progress = 1.0f - (battle_damage_popup_timer / battle_damage_popup_duration);
     float alpha = 1.0f - progress;
@@ -709,7 +988,7 @@ void ui_draw_battle_damage_popup(int action_box_y) {
     snprintf(damage_text, sizeof(damage_text), "-%d", battle_damage_popup_amount);
 
     Vector2 position;
-    if (battle_damage_popup_target == player_cocomon_idx) {
+    if (battle_damage_popup_side == BattleVisualSide::Player) {
         position = Vector2{ 160.0f, (float)action_box_y - 220.0f - progress * 28.0f };
     } else {
         position = Vector2{ screen_width * 0.62f, 170.0f - progress * 28.0f };
@@ -717,6 +996,64 @@ void ui_draw_battle_damage_popup(int action_box_y) {
 
     Color color = { 255, 214, 102, (unsigned char)(255.0f * alpha) };
     DrawText(damage_text, (int)position.x, (int)position.y, font_size, color);
+}
+
+void ui_draw_cocomon_list_screen() {
+    int title_font_size = 40;
+    int row_height = 82;
+    int row_gap = 10;
+    int start_y = 102;
+    int x = 80;
+    int width = screen_width - 160;
+
+    ClearBackground(color_surface_0);
+    DrawText("YOUR COCOMON", x, 40, title_font_size, WHITE);
+
+    for (int slot = 0; slot < player_party_count; slot++) {
+        const CocomonInstance& instance = player_party[slot];
+        bool selected = (int)ui_cursor == slot;
+        bool can_battle = cocomon_instance_can_battle(instance);
+        bool active = slot == player_active_party_slot;
+        int y = start_y + slot * (row_height + row_gap);
+        Color background = selected ? color_primary : color_surface_2;
+        Color text_color = can_battle ? WHITE : Color{ 210, 210, 210, 255 };
+        char summary[128];
+        char xp_text[64];
+        char tag[64];
+        int xp_needed = experience_to_next_level(instance.level);
+        float xp_ratio = xp_needed > 0 ? (float)instance.xp / (float)xp_needed : 0.0f;
+        int xp_bar_x = x + 18;
+        int xp_bar_y = y + row_height - 14;
+        int xp_bar_width = width - 36;
+        if (xp_ratio < 0.0f) xp_ratio = 0.0f;
+        if (xp_ratio > 1.0f) xp_ratio = 1.0f;
+
+        DrawRectangle(x, y, width, row_height, background);
+
+        snprintf(summary, sizeof(summary), "LV %d   HP %d/%d", instance.level, instance.battler.health, instance.battler.max_health);
+        snprintf(xp_text, sizeof(xp_text), "XP %d/%d", instance.xp, xp_needed);
+        DrawText(instance.battler.name, x + 18, y + 10, 30, text_color);
+        DrawText(summary, x + 18, y + 44, 22, text_color);
+        DrawText(xp_text, x + width - MeasureText(xp_text, 22) - 18, y + 44, 22, text_color);
+        DrawRectangle(xp_bar_x, xp_bar_y, xp_bar_width, 8, color_surface_1);
+        DrawRectangle(xp_bar_x, xp_bar_y, (int)(xp_bar_width * xp_ratio), 8, WHITE);
+
+        tag[0] = '\0';
+        if (active) strncpy(tag, "ACTIVE", sizeof(tag) - 1);
+        if (!can_battle) strncpy(tag, "FAINTED", sizeof(tag) - 1);
+        tag[sizeof(tag) - 1] = '\0';
+
+        if (tag[0] != '\0') {
+            int tag_width = MeasureText(tag, 24);
+            DrawText(tag, x + width - tag_width - 18, y + 12, 24, text_color);
+        }
+    }
+
+    if (cocomon_list_forced_selection) {
+        DrawText("Choose a Cocomon that can still fight.", x, screen_height - 60, 28, WHITE);
+    } else {
+        DrawText("ENTER to confirm   ESC to close", x, screen_height - 60, 28, WHITE);
+    }
 }
 
 Rectangle player_collision_box() {
@@ -864,11 +1201,13 @@ int main(void) {
     tex_cocomon_fronts[(size_t)Cocomon::FrickaFlow] = LoadTexture("sprites/fricka_flow_front.png");
     tex_cocomon_fronts[(size_t)Cocomon::Molly] = LoadTexture("sprites/molly_front.png");
     tex_cocomon_fronts[(size_t)Cocomon::Jokko] = LoadTexture("sprites/jokko_front.png");
+    tex_cocomon_fronts[(size_t)Cocomon::WakaCaca] = LoadTexture("sprites/waka-caca_front.png");
 
     tex_cocomon_backs[(size_t)Cocomon::LocoMoco] = LoadTexture("sprites/locomoco_back.png");
     tex_cocomon_backs[(size_t)Cocomon::FrickaFlow] = LoadTexture("sprites/fricka_flow_back.png");
     tex_cocomon_backs[(size_t)Cocomon::Molly] = LoadTexture("sprites/molly_back.png");
     tex_cocomon_backs[(size_t)Cocomon::Jokko] = LoadTexture("sprites/jokko_back.png");
+    tex_cocomon_backs[(size_t)Cocomon::WakaCaca] = LoadTexture("sprites/waka-caca_back.png");
 
     tex_npc[(size_t)Npc::Yamenko] = LoadTexture("sprites/npc_yamenko.png");
 
@@ -937,18 +1276,34 @@ int main(void) {
             cocomon_moves[(size_t)CocomonMove::LeafBlade]
         }
     };
+    cocomon_defaults[(size_t)Cocomon::WakaCaca] = {
+        .name = "WAKA CACA",
+        .element = CocomonElement::Water,
+        .health = 95,
+        .max_health = 95,
+        .attack = 18,
+        .defense = 11,
+        .speed = 16,
+        .moves = {
+            cocomon_moves[(size_t)CocomonMove::WaterGun],
+            cocomon_moves[(size_t)CocomonMove::LeafBlade]
+        }
+    };
 
     cocomons[(size_t)Cocomon::LocoMoco] = cocomon_defaults[(size_t)Cocomon::LocoMoco];
     cocomons[(size_t)Cocomon::FrickaFlow] = cocomon_defaults[(size_t)Cocomon::FrickaFlow];
     cocomons[(size_t)Cocomon::Molly] = cocomon_defaults[(size_t)Cocomon::Molly];
     cocomons[(size_t)Cocomon::Jokko] = cocomon_defaults[(size_t)Cocomon::Jokko];
+    cocomons[(size_t)Cocomon::WakaCaca] = cocomon_defaults[(size_t)Cocomon::WakaCaca];
 
-    player_party[0] = Cocomon::LocoMoco;
-    player_party[1] = Cocomon::Molly;
-    player_party[2] = Cocomon::FrickaFlow;
+    player_party[0] = make_cocomon_instance(Cocomon::LocoMoco, 5);
+    player_party[1] = make_cocomon_instance(Cocomon::Molly, 4);
+    player_party[2] = make_cocomon_instance(Cocomon::FrickaFlow, 4);
     player_party_count = 3;
     player_active_party_slot = 0;
     sync_player_active_cocomon_from_party();
+    battle_opponent_cocomon = make_cocomon_instance(Cocomon::Jokko, 4);
+    opponent_cocomon_idx = battle_opponent_cocomon.species;
 
     // --- WORLD SETUP ---
     for(int y = 0; y < 16; y++) {
@@ -1013,7 +1368,8 @@ int main(void) {
         switch (game_state) {
             case GameState::Overworld: {
                 if (IsKeyPressed(KEY_TAB)) {
-                    cycle_player_party_member();
+                    open_cocomon_list(GameState::Overworld, false);
+                    break;
                 }
 
                 // --- PLAYER MOVEMENT ---
@@ -1142,12 +1498,24 @@ int main(void) {
 
                 if (!battle_busy && IsKeyPressed(KEY_ENTER)) {
                     battle::Action action = battle::action_from_ui((BattleUIIndex)ui_cursor);
-                    battle::TurnResult result = battle::resolve_player_action(action);
-                    battle_queue_turn_result_playback(result);
-                    if (battle_beat_count > 0) {
-                        battle_start_next_beat();
-                    } else if (battle_pending_finish_reason != battle::FinishReason::None) {
-                        state_transition_overworld();
+                    if (action.type == battle::ActionType::OpenCocomonMenu) {
+                        battle::TurnResult result = battle::resolve_player_action(action);
+                        if (result.action_resolved) {
+                            open_cocomon_list(GameState::Battle, false);
+                        } else {
+                            battle_queue_turn_result_playback(result);
+                            if (battle_beat_count > 0) {
+                                battle_start_next_beat();
+                            }
+                        }
+                    } else {
+                        battle::TurnResult result = battle::resolve_player_action(action);
+                        battle_queue_turn_result_playback(result);
+                        if (battle_beat_count > 0) {
+                            battle_start_next_beat();
+                        } else if (battle_pending_finish_reason != battle::FinishReason::None) {
+                            state_transition_overworld();
+                        }
                     }
                 }
 
@@ -1156,6 +1524,44 @@ int main(void) {
                     bobbing_timer = bobbing_interval;
                 }
                 bobbing_timer -= delta;
+
+                break;
+            }
+            case GameState::CocomonList: {
+                if (IsKeyPressed(KEY_DOWN) && player_party_count > 0) {
+                    ui_cursor = (ui_cursor + 1) % (uint32_t)player_party_count;
+                }
+                if (IsKeyPressed(KEY_UP) && player_party_count > 0) {
+                    ui_cursor = (ui_cursor + (uint32_t)player_party_count - 1) % (uint32_t)player_party_count;
+                }
+
+                if (!cocomon_list_forced_selection && IsKeyPressed(KEY_ESCAPE)) {
+                    game_state_next = cocomon_list_return_state;
+                    break;
+                }
+
+                if (IsKeyPressed(KEY_ENTER) && player_party_count > 0) {
+                    int selected_slot = (int)ui_cursor;
+                    if (!player_party_slot_can_battle(selected_slot)) {
+                        break;
+                    }
+
+                    if (cocomon_list_return_state == GameState::Battle) {
+                        battle::TurnResult result = battle::resolve_player_switch(selected_slot, cocomon_list_forced_selection);
+                        if (!result.action_resolved) {
+                            break;
+                        }
+
+                        game_state_next = GameState::Battle;
+                        battle_queue_turn_result_playback(result);
+                        if (battle_beat_count > 0) {
+                            battle_start_next_beat();
+                        }
+                    } else {
+                        set_player_active_party_slot(selected_slot);
+                        game_state_next = cocomon_list_return_state;
+                    }
+                }
 
                 break;
             }
@@ -1241,20 +1647,20 @@ int main(void) {
                 // Opponent box
                 int opponent_cocomon_box_x = 15;
                 int opponent_cocomon_box_y = 15;
-                ui_draw_cocomon_box(15, 15, cocomons[(size_t)opponent_cocomon_idx], battle_opponent_health_display);
+                ui_draw_cocomon_box(15, 15, active_opponent_cocomon().battler, battle_opponent_health_display);
         
                 // Opponent cocomon
-                Vector2 opponent_attack_offset = battle_attack_offset(opponent_cocomon_idx);
+                Vector2 opponent_attack_offset = battle_attack_offset(BattleVisualSide::Opponent);
                 DrawTextureEx(tex_cocomon_fronts[(size_t)opponent_cocomon_idx], Vector2{screen_width * 0.5f + opponent_attack_offset.x, float(opponent_cocomon_box_y - -bobbing) + opponent_attack_offset.y}, 0.0f, 12.0f, WHITE);
         
                 // Player box
                 int player_cocomon_box_x = screen_width - cocomon_status_box_width - 15;
                 int player_cocomon_box_y = action_box_y - cocomon_status_box_height - 15;
-                ui_draw_cocomon_box(player_cocomon_box_x, player_cocomon_box_y, cocomons[(size_t)player_cocomon_idx], battle_player_health_display);
+                ui_draw_cocomon_box(player_cocomon_box_x, player_cocomon_box_y, active_player_cocomon().battler, battle_player_health_display);
                 
                 // Player cocomon
                 Texture2D tex_player_cocomon_back = tex_cocomon_backs[(size_t)player_cocomon_idx];
-                Vector2 player_attack_offset = battle_attack_offset(player_cocomon_idx);
+                Vector2 player_attack_offset = battle_attack_offset(BattleVisualSide::Player);
                 DrawTextureEx(tex_player_cocomon_back, Vector2{50.0f + player_attack_offset.x, float(action_box_y - (tex_player_cocomon_back.height * 14.0f) * 0.75f - bobbing) + player_attack_offset.y}, 0.0f, 14.0f, WHITE);
 
                 // Action bar / battle playback overlays
@@ -1266,7 +1672,7 @@ int main(void) {
                 break;
             }
             case GameState::CocomonList: {
-
+                ui_draw_cocomon_list_screen();
                 break;
             }
             default: {
