@@ -61,10 +61,10 @@ Music current_music_stream = {};
 bool music_loaded = false;
 WorldEntityDef world[world_height][world_width];
 const NpcDef npcs[] = {
-    { Npc::Yamenko, world_from_tile({25, 25}) },
-    { Npc::Yamenko, world_from_tile({50, 33})  },
-    { Npc::Yamenko, world_from_tile({33, 50})  },
-    { Npc::Yamenko, world_from_tile({5, 22})  },
+    { Npc::Yamenko, world_from_tile({25, 25}), 1 },
+    { Npc::Yamenko, world_from_tile({50, 33}), 2 },
+    { Npc::Yamenko, world_from_tile({33, 50}), 3 },
+    { Npc::Yamenko, world_from_tile({5, 22}), 4 },
 };
 const uint32_t npc_count = sizeof(npcs) / sizeof(npcs[0]);
 
@@ -78,8 +78,8 @@ int player_frames_per_row = 4;
 float player_frame_interval = 0.2f;
 PlayerAnimState last_player_animation_row = PlayerAnimState::IdleDown;
 PlayerAnimState player_animation_row = PlayerAnimState::IdleDown;
-float player_width = 32.0f;
-float player_height = 64.0f;
+float person_width = 32.0f;
+float person_height = 64.0f;
 
 // --- BOBBING ---
 int bobbing = 6;
@@ -1199,13 +1199,13 @@ int main(void) {
                 // Draw player
                 {
                     Rectangle src = { 
-                        player_frame * player_width, 
-                        (int)player_animation_row * player_height, 
-                        player_width, 
-                        player_height,
+                        player_frame * person_width, 
+                        (int)player_animation_row * person_height, 
+                        person_width, 
+                        person_height,
                     };
-                    Rectangle dst = { player_pos.x, player_pos.y, player_width, player_height };
-                    Vector2 origin = { player_width * 0.5f, player_height };
+                    Rectangle dst = { player_pos.x, player_pos.y, person_width, person_height };
+                    Vector2 origin = { person_width * 0.5f, person_height };
 
                     // Rectangle col_box = player_collision_box(); 
                     // DrawRectangle(col_box.x, col_box.y, col_box.width, col_box.height, BLUE);
@@ -1217,13 +1217,13 @@ int main(void) {
                     NpcDef npc = npcs[idx];
                     Texture2D tex = tex_npc[(size_t)npc.npc];
                     Rectangle src = { 
-                        npc.dir * player_width, 
+                        npc.dir * person_width, 
                         0.0f, 
-                        player_width, 
-                        player_height,
+                        person_width, 
+                        person_height,
                     };
-                    Rectangle dst = { npc.pos.x, npc.pos.y, player_width, player_height };
-                    Vector2 origin = { player_width * 0.5f, player_height };
+                    Rectangle dst = { npc.pos.x, npc.pos.y, person_width, person_height };
+                    Vector2 origin = { person_width * 0.5f, person_height };
 
                     DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
                 }
