@@ -84,7 +84,17 @@ enum class PlayerAnimState {
 enum class WorldEntity {
     Grass,
     GrassTall,
+    WallGrassEnd,
+    WallGrassLine,
+    WallGrassBend,
+    WallGrassT,
+    WallGrassX,
     COUNT,
+};
+
+struct WorldEntityDef {
+    WorldEntity entity;
+    float       rot;
 };
 
 enum class BattleUIIndex : uint32_t {
@@ -137,7 +147,7 @@ GameState game_state_next = GameState::Overworld;
 uint32_t ui_cursor = 0; // Each scene understands what this means.
 Music current_music_stream = {};
 bool music_loaded = false;
-WorldEntity world[world_height][world_width] = { };
+WorldEntityDef world[world_height][world_width];
 
 // --- PLAYER ---
 Texture2D tex_player;
@@ -326,7 +336,6 @@ Rectangle ui_draw_action_bar(int action_box_height, int action_box_y) {
     return { (float)0, (float)y, (float)width, (float)height };
 }
 
-
 void reset_keys() {
     for (int i = 0; i < key_count; i++) {
         key_stack[i] = MoveKey::Nil;
@@ -412,8 +421,13 @@ int main(void) {
     tex_cocomon_backs[(size_t)Cocomon::FrickaFlow] = LoadTexture("sprites/fricka_flow_back.png");
     tex_cocomon_backs[(size_t)Cocomon::Molly] = LoadTexture("sprites/molly_back.png");
 
-    tex_world_entities[(size_t)WorldEntity::Grass] = LoadTexture("sprites/grass_tile.png");
-    tex_world_entities[(size_t)WorldEntity::GrassTall] = LoadTexture("sprites/grass_tile_tall.png");
+    tex_world_entities[(size_t)WorldEntity::Grass]         = LoadTexture("sprites/grass_tile.png");
+    tex_world_entities[(size_t)WorldEntity::GrassTall]     = LoadTexture("sprites/grass_tile_tall.png");
+    tex_world_entities[(size_t)WorldEntity::WallGrassEnd]  = LoadTexture("sprites/wall_grass_end.png");
+    tex_world_entities[(size_t)WorldEntity::WallGrassLine] = LoadTexture("sprites/wall_grass_line.png");
+    tex_world_entities[(size_t)WorldEntity::WallGrassBend] = LoadTexture("sprites/wall_grass_bend.png");
+    tex_world_entities[(size_t)WorldEntity::WallGrassT]    = LoadTexture("sprites/wall_grass_t.png");
+    tex_world_entities[(size_t)WorldEntity::WallGrassX]    = LoadTexture("sprites/wall_grass_x.png");
 
     strcpy(cocomon_element_names[(size_t)CocomonElement::Grass], "GRASS");
     strcpy(cocomon_element_names[(size_t)CocomonElement::Fire], "FIRE");
@@ -430,9 +444,20 @@ int main(void) {
     // --- WORLD SETUP ---
     for(int y = 0; y < 8; y++) {
         for(int x = 0; x < 8; x++) {
-            world[y + 10][x + 10] = WorldEntity::GrassTall;
+            world[y + 10][x + 10] = { WorldEntity::GrassTall, 0.0f };
         }
     }
+    
+    for (int x = 1; x < world_width - 1; x++) world[0][x] = { WorldEntity::WallGrassLine, 90.0f };
+    for (int x = 1; x < world_width - 1; x++) world[world_height - 1][x] = { WorldEntity::WallGrassLine, 90.0f };
+
+    for (int y = 1; y < world_height; y++) world[y][0] = { WorldEntity::WallGrassLine, 0.0f };
+    for (int y = 1; y < world_height; y++) world[y][world_width - 1] = { WorldEntity::WallGrassLine, 0.0f };
+
+    world[0][0] = { WorldEntity::WallGrassBend, 0.0f };
+    world[0][world_width - 1] = { WorldEntity::WallGrassBend, 90.0f };
+    world[world_height - 1][world_width - 1] = { WorldEntity::WallGrassBend, 180.0f };
+    world[world_height - 1][0] = { WorldEntity::WallGrassBend, 270.0f };
 
     // --- CAMERA SETUP ---
     Camera2D camera = { 0 };
@@ -487,13 +512,13 @@ int main(void) {
                 // --- PLAYER COLLISION ---
                 Rectangle col_box = player_collision_box(); 
                 float half_width  = col_box.width * 0.5f;
-                float max_x = world_width * tile_size_f;
-                float max_y = world_height * tile_size_f;
-                if (col_box.x < 0.0f)
-                    player_pos.x = 0.0f + half_width;
+                float max_x = world_width * tile_size_f - tile_size_f;
+                float max_y = world_height * tile_size_f - tile_size_f;
+                if (col_box.x < tile_size_f)
+                    player_pos.x = tile_size_f + half_width;
 
-                if (col_box.y < 0.0f)
-                    player_pos.y = 0.0f + col_box.height;
+                if (col_box.y < tile_size_f)
+                    player_pos.y = tile_size_f + col_box.height;
 
                 if (col_box.x + col_box.width > max_x)
                     player_pos.x = max_x - half_width;
@@ -507,9 +532,9 @@ int main(void) {
                     for(int x = 0; x < world_width; x++) {
                         Vector2i tile_tile = { x, y };
                         Vector2 tile_world = world_from_tile(tile_tile);
-                        WorldEntity tile_entity = world[y][x];
+                        WorldEntityDef tile_entity = world[y][x];
                         Rectangle tile_rect = { tile_world.x, tile_world.y, tile_size_i, tile_size_i };
-                        if (rect_intersects(tile_rect, col_box) && tile_entity == WorldEntity::GrassTall) {
+                        if (rect_intersects(tile_rect, col_box) && tile_entity.entity == WorldEntity::GrassTall) {
                             standing_in_tall_grass = true;
                         }
                     }
@@ -632,13 +657,13 @@ int main(void) {
                         int world_x = x * tile_size_i;
                         int world_y = y * tile_size_i;
 
-                        WorldEntity world_entity = world[y][x];
-                        Texture2D tex = tex_world_entities[(size_t)world_entity];
+                        WorldEntityDef world_entity = world[y][x];
+                        Texture2D tex = tex_world_entities[(size_t)world_entity.entity];
                         Rectangle src = { 0.0f, 0.0f, tile_size_f, tile_size_f };
-                        Rectangle dst = { (float)world_x, (float)world_y, tile_size_f, tile_size_f };
-                        Vector2 origin = { 0.0f, 0.0f };
+                        Rectangle dst = { (float)world_x + tile_size_f * 0.5f, (float)world_y + tile_size_f * 0.5f, tile_size_f, tile_size_f };
+                        Vector2 origin = { tile_size_f * 0.5f, tile_size_f * 0.5f };
 
-                        DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
+                        DrawTexturePro(tex, src, dst, origin, world_entity.rot, WHITE);
                     }
                 }
 
