@@ -22,6 +22,13 @@ static inline void debug_break() {
 }
 
 // =====================================================================================================================
+// FORWARD DECLARATIONS
+// =====================================================================================================================
+
+float world_from_tile(int tile);
+Vector2 world_from_tile(Vector2i tile);
+
+// =====================================================================================================================
 // STATE
 // =====================================================================================================================
 
@@ -40,6 +47,7 @@ CocomonDef cocomons[max_cocomons];
 CocomonDef cocomon_defaults[max_cocomons];
 Texture2D tex_cocomon_fronts[max_cocomons];
 Texture2D tex_cocomon_backs[max_cocomons];
+Texture2D tex_npc[(size_t)Npc::COUNT];
 Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
 Cocomon player_cocomon_idx = Cocomon::LocoMoco;
 Cocomon opponent_cocomon_idx = Cocomon::FrickaFlow;
@@ -49,6 +57,13 @@ uint32_t ui_cursor = 0; // Each scene understands what this means.
 Music current_music_stream = {};
 bool music_loaded = false;
 WorldEntityDef world[world_height][world_width];
+const NpcDef npcs[] = {
+    { Npc::Yamenko, world_from_tile({25, 25}) },
+    { Npc::Yamenko, world_from_tile({50, 33})  },
+    { Npc::Yamenko, world_from_tile({33, 50})  },
+    { Npc::Yamenko, world_from_tile({5, 22})  },
+};
+const uint32_t npc_count = sizeof(npcs) / sizeof(npcs[0]);
 
 // --- PLAYER ---
 Texture2D tex_player;
@@ -451,6 +466,8 @@ int main(void) {
     tex_cocomon_backs[(size_t)Cocomon::FrickaFlow] = LoadTexture("sprites/fricka_flow_back.png");
     tex_cocomon_backs[(size_t)Cocomon::Molly] = LoadTexture("sprites/molly_back.png");
 
+    tex_npc[(size_t)Npc::Yamenko] = LoadTexture("sprites/npc_yamenko.png");
+
     tex_world_entities[(size_t)WorldEntity::Grass]         = LoadTexture("sprites/grass_tile.png");
     tex_world_entities[(size_t)WorldEntity::GrassTall]     = LoadTexture("sprites/grass_tile_tall.png");
     tex_world_entities[(size_t)WorldEntity::WallGrassEnd]  = LoadTexture("sprites/wall_grass_end.png");
@@ -756,18 +773,36 @@ int main(void) {
                 }
 
                 // Draw player
-                Rectangle src = { 
-                    player_frame * player_width, 
-                    (int)player_animation_row * player_height, 
-                    player_width, 
-                    player_height,
-                };
-                Rectangle dst = { player_pos.x, player_pos.y, player_width, player_height };
-                Vector2 origin = { player_width * 0.5f, player_height };
+                {
+                    Rectangle src = { 
+                        player_frame * player_width, 
+                        (int)player_animation_row * player_height, 
+                        player_width, 
+                        player_height,
+                    };
+                    Rectangle dst = { player_pos.x, player_pos.y, player_width, player_height };
+                    Vector2 origin = { player_width * 0.5f, player_height };
 
-                // Rectangle col_box = player_collision_box(); 
-                // DrawRectangle(col_box.x, col_box.y, col_box.width, col_box.height, BLUE);
-                DrawTexturePro(tex_player, src, dst, origin, 0.0f, WHITE);
+                    // Rectangle col_box = player_collision_box(); 
+                    // DrawRectangle(col_box.x, col_box.y, col_box.width, col_box.height, BLUE);
+                    DrawTexturePro(tex_player, src, dst, origin, 0.0f, WHITE);
+                }
+
+                // Draw NPCS
+                for (int idx = 0; idx < npc_count; idx++) {
+                    NpcDef npc = npcs[idx];
+                    Texture2D tex = tex_npc[(size_t)npc.npc];
+                    Rectangle src = { 
+                        npc.dir * player_width, 
+                        0.0f, 
+                        player_width, 
+                        player_height,
+                    };
+                    Rectangle dst = { npc.pos.x, npc.pos.y, player_width, player_height };
+                    Vector2 origin = { player_width * 0.5f, player_height };
+
+                    DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
+                }
 
                 EndMode2D();
 
