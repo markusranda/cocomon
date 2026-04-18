@@ -31,6 +31,12 @@ struct Vector2i {
 static inline bool operator==(Vector2i a, Vector2i b) { return (a.x == b.x) && (a.y == b.y); }
 static inline bool operator!=(Vector2i a, Vector2i b) { return !(a == b); }
 
+enum class Npc {
+    Nil,
+    Yamenko,
+    COUNT,
+};
+
 enum class MoveKey {
     Nil,
     W,
@@ -119,6 +125,12 @@ struct WorldEntityDef {
     float       rot;
     int         frame_count;
     int         frame_index;
+};
+
+struct NpcDef {
+    Npc npc;
+    Vector2 pos;
+    int dir; // Notice: All npcs are assumed to have all four directions
 };
 
 enum class BattleUIIndex : uint32_t {
