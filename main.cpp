@@ -64,10 +64,11 @@ Music current_music_stream = {};
 bool music_loaded = false;
 WorldEntityDef world[world_height][world_width];
 const NpcDef npcs[] = {
-    { Npc::Yamenko, world_from_tile({25, 25}), 1 },
-    { Npc::Yamenko, world_from_tile({50, 33}), 2 },
-    { Npc::Yamenko, world_from_tile({33, 50}), 3 },
-    { Npc::Yamenko, world_from_tile({5, 22}), 4 },
+    { Npc::Yamenko, world_from_tile({25, 25}), EntityDirection::Down },
+    { Npc::Yamenko, world_from_tile({50, 33}), EntityDirection::Up },
+    { Npc::Yamenko, world_from_tile({33, 50}), EntityDirection::Right },
+    { Npc::Yamenko, world_from_tile({5, 22}),  EntityDirection::Left },
+    { Npc::Ippip,   world_from_tile({30, 30}), EntityDirection::Down },
 };
 const uint32_t npc_count = sizeof(npcs) / sizeof(npcs[0]);
 
@@ -1056,13 +1057,13 @@ void ui_draw_cocomon_list_screen() {
     }
 }
 
-Rectangle player_collision_box() {
+Rectangle entity_collision_box(Vector2 position) {
     float foot_width = 20.0f;
     float foot_height = 8.0f;
 
     Rectangle result = {
-        player_pos.x - foot_width * 0.5f,
-        player_pos.y - foot_height,
+        position.x - foot_width * 0.5f,
+        position.y - foot_height,
         foot_width,
         foot_height,
     };
@@ -1070,11 +1071,64 @@ Rectangle player_collision_box() {
     return result;
 }
 
+Rectangle player_collision_box() {
+    return entity_collision_box(player_pos);
+}
+
 bool rect_intersects(Rectangle a, Rectangle b) {
     return (a.x < b.x + b.width)  &&
            (a.y < b.y + b.height) &&
            (a.x + a.width > b.x)  &&
            (a.y + a.height > b.y);
+}
+
+static bool rect_overlaps(Rectangle a, Rectangle b) {
+    return a.x < b.x + b.width &&
+           a.x + a.width > b.x &&
+           a.y < b.y + b.height &&
+           a.y + a.height > b.y;
+}
+
+void resolve_against_npc_x(float delta_x) {
+    Rectangle player_box = player_collision_box();
+
+    for(int entity_index = 0; entity_index < npc_count; entity_index++) {
+        const NpcDef &npc = npcs[entity_index];
+
+        Rectangle entity_box = entity_collision_box(npc.pos);
+
+        if(!rect_overlaps(player_box, entity_box)) continue;
+
+        if(delta_x > 0.0f) {
+            player_pos.x = entity_box.x - player_box.width * 0.5f;
+        }
+        else if(delta_x < 0.0f) {
+            player_pos.x = entity_box.x + entity_box.width + player_box.width * 0.5f;
+        }
+
+        player_box = player_collision_box();
+    }
+}
+
+void resolve_against_npc_y(float delta_y) {
+    Rectangle player_box = player_collision_box();
+
+    for(int entity_index = 0; entity_index < npc_count; entity_index++) {
+        const NpcDef &npc = npcs[entity_index];
+
+        Rectangle entity_box = entity_collision_box(npc.pos);
+
+        if(!rect_overlaps(player_box, entity_box)) continue;
+
+        if(delta_y > 0.0f) {
+            player_pos.y = entity_box.y;
+        }
+        else if(delta_y < 0.0f) {
+            player_pos.y = entity_box.y + entity_box.height;
+        }
+
+        player_box = player_collision_box();
+    }
 }
 
 bool world_entity_blocks_movement(WorldEntity entity) {
@@ -1097,16 +1151,16 @@ bool world_entity_blocks_movement(WorldEntity entity) {
 }
 
 void move_and_resolve_player(Vector2 delta) {
-    // -------------------------------------------------------------------- 
-    // X AXIS 
-    // ----------------- --------------------------------------------------
+    // --------------------------------------------------------------------
+    // X AXIS
+    // --------------------------------------------------------------------
     player_pos.x += delta.x;
 
     Rectangle box = player_collision_box();
 
     float epsilon = 0.001f;
     int left      = tile_from_world(box.x);
-    int right     = tile_from_world(box.x + box.width  - epsilon);
+    int right     = tile_from_world(box.x + box.width - epsilon);
     int top       = tile_from_world(box.y);
     int bottom    = tile_from_world(box.y + box.height - epsilon);
 
@@ -1114,7 +1168,6 @@ void move_and_resolve_player(Vector2 delta) {
     if(bottom >= world_height) bottom = world_height - 1;
 
     if(delta.x > 0.0f) {
-        // moving right
         if(right >= world_width) {
             player_pos.x = world_from_tile(world_width) - box.width * 0.5f;
         } else {
@@ -1127,7 +1180,6 @@ void move_and_resolve_player(Vector2 delta) {
         }
     }
     else if(delta.x < 0.0f) {
-        // moving left
         if(left < 0) {
             player_pos.x = box.width * 0.5f;
         } else {
@@ -1140,15 +1192,17 @@ void move_and_resolve_player(Vector2 delta) {
         }
     }
 
-    // -------------------------------------------------------------------- 
+    resolve_against_npc_x(delta.x);
+
+    // --------------------------------------------------------------------
     // Y AXIS
-    // ----------------- --------------------------------------------------
+    // --------------------------------------------------------------------
     player_pos.y += delta.y;
 
     box = player_collision_box();
 
     left   = tile_from_world(box.x);
-    right  = tile_from_world(box.x + box.width  - epsilon);
+    right  = tile_from_world(box.x + box.width - epsilon);
     top    = tile_from_world(box.y);
     bottom = tile_from_world(box.y + box.height - epsilon);
 
@@ -1156,7 +1210,6 @@ void move_and_resolve_player(Vector2 delta) {
     if(right >= world_width) right = world_width - 1;
 
     if(delta.y > 0.0f) {
-        // moving down
         if(bottom >= world_height) {
             player_pos.y = world_from_tile(world_height);
         } else {
@@ -1169,7 +1222,6 @@ void move_and_resolve_player(Vector2 delta) {
         }
     }
     else if(delta.y < 0.0f) {
-        // moving up
         if(top < 0) {
             player_pos.y = box.height;
         } else {
@@ -1181,6 +1233,8 @@ void move_and_resolve_player(Vector2 delta) {
             }
         }
     }
+
+    resolve_against_npc_y(delta.y);
 }
 
 // =====================================================================================================================
@@ -1210,6 +1264,7 @@ int main(void) {
     tex_cocomon_backs[(size_t)Cocomon::WakaCaca] = LoadTexture("sprites/waka-caca_back.png");
 
     tex_npc[(size_t)Npc::Yamenko] = LoadTexture("sprites/npc_yamenko.png");
+    tex_npc[(size_t)Npc::Ippip] = LoadTexture("sprites/npc_ippip.png");
 
     tex_world_entities[(size_t)WorldEntity::Grass]         = LoadTexture("sprites/grass_tile.png");
     tex_world_entities[(size_t)WorldEntity::GrassTall]     = LoadTexture("sprites/grass_tile_tall.png");
@@ -1623,7 +1678,7 @@ int main(void) {
                     NpcDef npc = npcs[idx];
                     Texture2D tex = tex_npc[(size_t)npc.npc];
                     Rectangle src = { 
-                        npc.dir * person_width, 
+                        (uint32_t)npc.dir * person_width, 
                         0.0f, 
                         person_width, 
                         person_height,
