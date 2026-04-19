@@ -180,12 +180,35 @@ enum class BattleUIIndex : uint32_t {
     Run          = 7,
 };
 
+struct Building {
+    Texture2D tex;
+    Vector2 pos;
+    Vector2 size;
+};
+
+struct Renderable {
+    Texture2D tex;
+    Rectangle src;
+    Rectangle dst;
+    Vector2 origin;
+    float rotation;
+    float sort_y;
+};
+
+struct SweepHit {
+    bool hit;
+    float time;
+    Vector2 normal;
+};
+
 constexpr int default_screen_width = 800;
 constexpr int default_screen_height = 800;
 constexpr int font_size_move = 32;
 constexpr int max_player_party = 6;
 constexpr int max_cocomons = 32;
 constexpr int max_npcs = 32;
+constexpr int max_renderables = 4096;
+constexpr int max_collidables = 4096;
 constexpr int world_width = 64;
 constexpr int world_height = 64;
 constexpr int tile_size_i = 32;

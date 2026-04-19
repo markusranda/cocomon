@@ -6,6 +6,7 @@
 #include <string.h>
 #include <cmath>
 #include <ctime>
+#include <float.h>
 
 static inline void debug_break() {
 #if defined(_MSC_VER)
@@ -33,6 +34,7 @@ void open_cocomon_list(GameState return_state, bool forced_selection);
 // STATE
 // =====================================================================================================================
 
+Rectangle debug_collision_box = {};
 const Color color_surface_0 = Color{ 130, 130, 130, 250 };
 const Color color_surface_1 = Color{ 150, 150, 150, 250 };
 const Color color_surface_2 = Color{ 170, 170, 170, 250 };
@@ -50,6 +52,7 @@ Texture2D tex_cocomon_fronts[max_cocomons];
 Texture2D tex_cocomon_backs[max_cocomons];
 Texture2D tex_npc[(size_t)Npc::COUNT];
 Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
+Building nurse_tent = {};
 CocomonInstance player_party[max_player_party];
 int player_party_count = 0;
 int player_active_party_slot = 0;
@@ -110,6 +113,14 @@ struct BattleBeat {
     bool trigger_attack;
 };
 
+// Renderables
+Renderable renderables[max_renderables];
+uint32_t renderables_count = 0;
+
+// Collidables
+Rectangle collidables[max_collidables];
+uint32_t collidables_count = 0;
+
 BattleBeat battle_beats[battle_playback_capacity];
 int battle_beat_count = 0;
 int battle_beat_index = 0;
@@ -142,6 +153,36 @@ float tile_anime_interval = 0.25f;
 // METHODS
 // =====================================================================================================================
 
+bool renderables_push(Renderable renderable) {
+    if (renderables_count == max_renderables) {
+        debug_break();
+        return false;
+    }
+
+    renderables[renderables_count++] = renderable;
+    
+    return true;
+}
+
+bool collidables_push(Rectangle collidable) {
+    if (collidables_count >= max_collidables) {
+        debug_break();
+        return false;
+    }
+
+    collidables[collidables_count++] = collidable;
+    return true;
+}
+
+int cmp_renderable(const void* a, const void* b) {
+    float y1 = ((Renderable*)a)->sort_y;
+    float y2 = ((Renderable*)b)->sort_y;
+
+    if (y1 < y2) return -1;
+    if (y1 > y2) return 1;
+    return 0;
+}
+
 inline float distance(Vector2i a, Vector2i b) {
     int dx = b.x - a.x;
     int dy = b.y - a.y;
@@ -170,6 +211,8 @@ bool chance(float probability) {
     return ((float)rand() / ((float)RAND_MAX + 1.0f)) < probability;
 }
 
+// ------ COORDINATE CONVERTERS ------
+
 int tile_from_world(float world) {
     return (int)floorf(world / tile_size_f);
 }
@@ -194,6 +237,17 @@ Vector2 world_from_tile(Vector2i tile) {
     result.y = tile.y * tile_size_f;
 
     return result;
+}
+
+Vector2i vector2i_from_direction(EntityDirection dir) {
+    switch (dir) {
+        case EntityDirection::Up:    return { 0, -1 };
+        case EntityDirection::Right: return { 1,  0 };
+        case EntityDirection::Down:  return { 0,  1 };
+        case EntityDirection::Left:  return { -1, 0 };
+    }
+
+    return { 0, 0 }; // fallback
 }
 
 bool cocomon_instance_is_valid(const CocomonInstance& instance) {
@@ -370,7 +424,9 @@ CocomonInstance& active_opponent_cocomon() {
     return battle_opponent_cocomon;
 }
 
-Rectangle ui_draw_cocomon_box(int x, int y, const CocomonDef& cocomon, float displayed_health = -1.0f) {
+// ------ UI DRAW FUNCTIONS ------
+
+void ui_draw_cocomon_box(int x, int y, const CocomonDef& cocomon, float displayed_health = -1.0f) {
     int width = int(screen_width * 0.35f);
     int height = int(screen_height * 0.13f);
     int health_box_width = width - 30;
@@ -397,8 +453,6 @@ Rectangle ui_draw_cocomon_box(int x, int y, const CocomonDef& cocomon, float dis
     char text_stats[64];
     snprintf(text_stats, sizeof(text_stats), "ATK %d  DEF %d  SPD %d", cocomon.attack, cocomon.defense, cocomon.speed);
     DrawText(text_stats, x + 15, stats_y + stats_font_size + 4, stats_font_size, WHITE);
-
-    return { (float)x, (float)y, (float)width, (float)height };
 }
 
 void ui_draw_action_bar_move(int x, int y, int cell_width, int cell_height, bool selected, CocomonMoveDef move) {
@@ -492,7 +546,7 @@ void ui_draw_action_bar_menu(int x, int y, int width, int height) {
     ui_draw_action_bar_menu_item(bot_right_x, bot_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Run, "RUN");
 }
 
-Rectangle ui_draw_action_bar(int action_box_height, int action_box_y) {    
+void ui_draw_action_bar(int action_box_height, int action_box_y) {    
     int x = 0;
     int y = action_box_y;
     int width = screen_width;
@@ -504,11 +558,9 @@ Rectangle ui_draw_action_bar(int action_box_height, int action_box_y) {
 
     ui_draw_action_bar_moves(x, y, moves_width, height);
     ui_draw_action_bar_menu(x + moves_width, y, screen_width - moves_width, height);
-
-    return { (float)0, (float)y, (float)width, (float)height };
 }
 
-Rectangle ui_draw_battle_caption_banner(int y, const char* message, float alpha) {
+void ui_draw_battle_caption_banner(int y, const char* message, float alpha) {
     int font_size = 28;
     int padding_x = 26;
     int padding_y = 16;
@@ -526,8 +578,84 @@ Rectangle ui_draw_battle_caption_banner(int y, const char* message, float alpha)
     DrawRectangle(x, y, width, height, bg);
     DrawRectangleLinesEx(Rectangle{ (float)x, (float)y, (float)width, (float)height }, 4.0f, border);
     DrawText(message, x + padding_x, y + padding_y, font_size, fg);
+}
 
-    return { (float)x, (float)y, (float)width, (float)height };
+void ui_draw_battle_damage_popup(int action_box_y) {
+    if (battle_damage_popup_timer <= 0.0f || battle_damage_popup_side == BattleVisualSide::None || battle_damage_popup_amount <= 0) return;
+
+    float progress = 1.0f - (battle_damage_popup_timer / battle_damage_popup_duration);
+    float alpha = 1.0f - progress;
+    int font_size = 34;
+    char damage_text[16];
+    snprintf(damage_text, sizeof(damage_text), "-%d", battle_damage_popup_amount);
+
+    Vector2 position;
+    if (battle_damage_popup_side == BattleVisualSide::Player) {
+        position = Vector2{ 160.0f, (float)action_box_y - 220.0f - progress * 28.0f };
+    } else {
+        position = Vector2{ screen_width * 0.62f, 170.0f - progress * 28.0f };
+    }
+
+    Color color = { 255, 214, 102, (unsigned char)(255.0f * alpha) };
+    DrawText(damage_text, (int)position.x, (int)position.y, font_size, color);
+}
+
+void ui_draw_cocomon_list_screen() {
+    int title_font_size = 40;
+    int row_height = 82;
+    int row_gap = 10;
+    int start_y = 102;
+    int x = 80;
+    int width = screen_width - 160;
+
+    ClearBackground(color_surface_0);
+    DrawText("YOUR COCOMON", x, 40, title_font_size, WHITE);
+
+    for (int slot = 0; slot < player_party_count; slot++) {
+        const CocomonInstance& instance = player_party[slot];
+        bool selected = (int)ui_cursor == slot;
+        bool can_battle = cocomon_instance_can_battle(instance);
+        bool active = slot == player_active_party_slot;
+        int y = start_y + slot * (row_height + row_gap);
+        Color background = selected ? color_primary : color_surface_2;
+        Color text_color = can_battle ? WHITE : Color{ 210, 210, 210, 255 };
+        char summary[128];
+        char xp_text[64];
+        char tag[64];
+        int xp_needed = experience_to_next_level(instance.level);
+        float xp_ratio = xp_needed > 0 ? (float)instance.xp / (float)xp_needed : 0.0f;
+        int xp_bar_x = x + 18;
+        int xp_bar_y = y + row_height - 14;
+        int xp_bar_width = width - 36;
+        if (xp_ratio < 0.0f) xp_ratio = 0.0f;
+        if (xp_ratio > 1.0f) xp_ratio = 1.0f;
+
+        DrawRectangle(x, y, width, row_height, background);
+
+        snprintf(summary, sizeof(summary), "LV %d   HP %d/%d", instance.level, instance.battler.health, instance.battler.max_health);
+        snprintf(xp_text, sizeof(xp_text), "XP %d/%d", instance.xp, xp_needed);
+        DrawText(instance.battler.name, x + 18, y + 10, 30, text_color);
+        DrawText(summary, x + 18, y + 44, 22, text_color);
+        DrawText(xp_text, x + width - MeasureText(xp_text, 22) - 18, y + 44, 22, text_color);
+        DrawRectangle(xp_bar_x, xp_bar_y, xp_bar_width, 8, color_surface_1);
+        DrawRectangle(xp_bar_x, xp_bar_y, (int)(xp_bar_width * xp_ratio), 8, WHITE);
+
+        tag[0] = '\0';
+        if (active) strncpy(tag, "ACTIVE", sizeof(tag) - 1);
+        if (!can_battle) strncpy(tag, "FAINTED", sizeof(tag) - 1);
+        tag[sizeof(tag) - 1] = '\0';
+
+        if (tag[0] != '\0') {
+            int tag_width = MeasureText(tag, 24);
+            DrawText(tag, x + width - tag_width - 18, y + 12, 24, text_color);
+        }
+    }
+
+    if (cocomon_list_forced_selection) {
+        DrawText("Choose a Cocomon that can still fight.", x, screen_height - 60, 28, WHITE);
+    } else {
+        DrawText("ENTER to confirm   ESC to close", x, screen_height - 60, 28, WHITE);
+    }
 }
 
 float move_towards_float(float current, float target, float max_delta) {
@@ -759,6 +887,8 @@ void battle_queue_turn_result_playback(const battle::TurnResult& result) {
     }
 }
 
+// ------ KEY HANDLING ------
+
 void reset_keys() {
     for (int i = 0; i < key_count; i++) {
         key_stack[i] = MoveKey::Nil;
@@ -980,83 +1110,7 @@ Vector2 battle_attack_offset(BattleVisualSide side) {
     return {};
 }
 
-void ui_draw_battle_damage_popup(int action_box_y) {
-    if (battle_damage_popup_timer <= 0.0f || battle_damage_popup_side == BattleVisualSide::None || battle_damage_popup_amount <= 0) return;
-
-    float progress = 1.0f - (battle_damage_popup_timer / battle_damage_popup_duration);
-    float alpha = 1.0f - progress;
-    int font_size = 34;
-    char damage_text[16];
-    snprintf(damage_text, sizeof(damage_text), "-%d", battle_damage_popup_amount);
-
-    Vector2 position;
-    if (battle_damage_popup_side == BattleVisualSide::Player) {
-        position = Vector2{ 160.0f, (float)action_box_y - 220.0f - progress * 28.0f };
-    } else {
-        position = Vector2{ screen_width * 0.62f, 170.0f - progress * 28.0f };
-    }
-
-    Color color = { 255, 214, 102, (unsigned char)(255.0f * alpha) };
-    DrawText(damage_text, (int)position.x, (int)position.y, font_size, color);
-}
-
-void ui_draw_cocomon_list_screen() {
-    int title_font_size = 40;
-    int row_height = 82;
-    int row_gap = 10;
-    int start_y = 102;
-    int x = 80;
-    int width = screen_width - 160;
-
-    ClearBackground(color_surface_0);
-    DrawText("YOUR COCOMON", x, 40, title_font_size, WHITE);
-
-    for (int slot = 0; slot < player_party_count; slot++) {
-        const CocomonInstance& instance = player_party[slot];
-        bool selected = (int)ui_cursor == slot;
-        bool can_battle = cocomon_instance_can_battle(instance);
-        bool active = slot == player_active_party_slot;
-        int y = start_y + slot * (row_height + row_gap);
-        Color background = selected ? color_primary : color_surface_2;
-        Color text_color = can_battle ? WHITE : Color{ 210, 210, 210, 255 };
-        char summary[128];
-        char xp_text[64];
-        char tag[64];
-        int xp_needed = experience_to_next_level(instance.level);
-        float xp_ratio = xp_needed > 0 ? (float)instance.xp / (float)xp_needed : 0.0f;
-        int xp_bar_x = x + 18;
-        int xp_bar_y = y + row_height - 14;
-        int xp_bar_width = width - 36;
-        if (xp_ratio < 0.0f) xp_ratio = 0.0f;
-        if (xp_ratio > 1.0f) xp_ratio = 1.0f;
-
-        DrawRectangle(x, y, width, row_height, background);
-
-        snprintf(summary, sizeof(summary), "LV %d   HP %d/%d", instance.level, instance.battler.health, instance.battler.max_health);
-        snprintf(xp_text, sizeof(xp_text), "XP %d/%d", instance.xp, xp_needed);
-        DrawText(instance.battler.name, x + 18, y + 10, 30, text_color);
-        DrawText(summary, x + 18, y + 44, 22, text_color);
-        DrawText(xp_text, x + width - MeasureText(xp_text, 22) - 18, y + 44, 22, text_color);
-        DrawRectangle(xp_bar_x, xp_bar_y, xp_bar_width, 8, color_surface_1);
-        DrawRectangle(xp_bar_x, xp_bar_y, (int)(xp_bar_width * xp_ratio), 8, WHITE);
-
-        tag[0] = '\0';
-        if (active) strncpy(tag, "ACTIVE", sizeof(tag) - 1);
-        if (!can_battle) strncpy(tag, "FAINTED", sizeof(tag) - 1);
-        tag[sizeof(tag) - 1] = '\0';
-
-        if (tag[0] != '\0') {
-            int tag_width = MeasureText(tag, 24);
-            DrawText(tag, x + width - tag_width - 18, y + 12, 24, text_color);
-        }
-    }
-
-    if (cocomon_list_forced_selection) {
-        DrawText("Choose a Cocomon that can still fight.", x, screen_height - 60, 28, WHITE);
-    } else {
-        DrawText("ENTER to confirm   ESC to close", x, screen_height - 60, 28, WHITE);
-    }
-}
+// ------ COLLISION HANDLING ------
 
 Rectangle entity_collision_box(Vector2 position) {
     float foot_width = 20.0f;
@@ -1151,102 +1205,228 @@ bool world_entity_blocks_movement(WorldEntity entity) {
     }
 }
 
-void move_and_resolve_player(Vector2 delta) {
-    // --------------------------------------------------------------------
-    // X AXIS
-    // --------------------------------------------------------------------
-    player_pos.x += delta.x;
-
-    Rectangle box = player_collision_box();
-
-    float epsilon = 0.001f;
-    int left      = tile_from_world(box.x);
-    int right     = tile_from_world(box.x + box.width - epsilon);
-    int top       = tile_from_world(box.y);
-    int bottom    = tile_from_world(box.y + box.height - epsilon);
-
-    if(top < 0) top = 0;
-    if(bottom >= world_height) bottom = world_height - 1;
-
-    if(delta.x > 0.0f) {
-        if(right >= world_width) {
-            player_pos.x = world_from_tile(world_width) - box.width * 0.5f;
-        } else {
-            for(int y = top; y <= bottom; y++) {
-                if(world_entity_blocks_movement(world[y][right].entity)) {
-                    player_pos.x = world_from_tile(right) - box.width * 0.5f;
-                    break;
-                }
-            }
-        }
-    }
-    else if(delta.x < 0.0f) {
-        if(left < 0) {
-            player_pos.x = box.width * 0.5f;
-        } else {
-            for(int y = top; y <= bottom; y++) {
-                if(world_entity_blocks_movement(world[y][left].entity)) {
-                    player_pos.x = world_from_tile(left + 1) + box.width * 0.5f;
-                    break;
-                }
-            }
-        }
-    }
-
-    resolve_against_npc_x(delta.x);
-
-    // --------------------------------------------------------------------
-    // Y AXIS
-    // --------------------------------------------------------------------
-    player_pos.y += delta.y;
-
-    box = player_collision_box();
-
-    left   = tile_from_world(box.x);
-    right  = tile_from_world(box.x + box.width - epsilon);
-    top    = tile_from_world(box.y);
-    bottom = tile_from_world(box.y + box.height - epsilon);
-
-    if(left < 0) left = 0;
-    if(right >= world_width) right = world_width - 1;
-
-    if(delta.y > 0.0f) {
-        if(bottom >= world_height) {
-            player_pos.y = world_from_tile(world_height);
-        } else {
-            for(int x = left; x <= right; x++) {
-                if(world_entity_blocks_movement(world[bottom][x].entity)) {
-                    player_pos.y = world_from_tile(bottom);
-                    break;
-                }
-            }
-        }
-    }
-    else if(delta.y < 0.0f) {
-        if(top < 0) {
-            player_pos.y = box.height;
-        } else {
-            for(int x = left; x <= right; x++) {
-                if(world_entity_blocks_movement(world[top][x].entity)) {
-                    player_pos.y = world_from_tile(top + 1) + box.height;
-                    break;
-                }
-            }
-        }
-    }
-
-    resolve_against_npc_y(delta.y);
+bool ranges_overlap(float min_a, float max_a, float min_b, float max_b) {
+    return (max_a > min_b) && (min_a < max_b);
 }
 
-Vector2i vector2i_from_direction(EntityDirection dir) {
-    switch (dir) {
-        case EntityDirection::Up:    return { 0, -1 };
-        case EntityDirection::Right: return { 1,  0 };
-        case EntityDirection::Down:  return { 0,  1 };
-        case EntityDirection::Left:  return { -1, 0 };
+SweepHit ray_vs_rect(Vector2 ray_origin, Vector2 ray_delta, Rectangle box) {
+    SweepHit result = {};
+    result.hit = false;
+    result.time = 1.0f;
+    result.normal = { 0.0f, 0.0f };
+
+    float inv_dx = 0.0f;
+    float inv_dy = 0.0f;
+
+    if(ray_delta.x != 0.0f) inv_dx = 1.0f / ray_delta.x;
+    if(ray_delta.y != 0.0f) inv_dy = 1.0f / ray_delta.y;
+
+    float tx1, tx2;
+    if(ray_delta.x == 0.0f) {
+        if(ray_origin.x < box.x || ray_origin.x > box.x + box.width) return result;
+        tx1 = -FLT_MAX;
+        tx2 = FLT_MAX;
+    } else {
+        tx1 = (box.x - ray_origin.x) * inv_dx;
+        tx2 = (box.x + box.width - ray_origin.x) * inv_dx;
     }
 
-    return { 0, 0 }; // fallback
+    float ty1, ty2;
+    if(ray_delta.y == 0.0f) {
+        if(ray_origin.y < box.y || ray_origin.y > box.y + box.height) return result;
+        ty1 = -FLT_MAX;
+        ty2 = FLT_MAX;
+    } else {
+        ty1 = (box.y - ray_origin.y) * inv_dy;
+        ty2 = (box.y + box.height - ray_origin.y) * inv_dy;
+    }
+
+    float t_near_x = tx1 < tx2 ? tx1 : tx2;
+    float t_far_x  = tx1 > tx2 ? tx1 : tx2;
+    float t_near_y = ty1 < ty2 ? ty1 : ty2;
+    float t_far_y  = ty1 > ty2 ? ty1 : ty2;
+
+    float t_entry = t_near_x > t_near_y ? t_near_x : t_near_y;
+    float t_exit  = t_far_x < t_far_y ? t_far_x : t_far_y;
+
+    if(t_entry > t_exit) return result;
+    if(t_exit < 0.0f) return result;
+    if(t_entry > 1.0f) return result;
+
+    result.hit = true;
+    result.time = t_entry < 0.0f ? 0.0f : t_entry;
+
+    if(t_near_x > t_near_y) {
+        result.normal.x = ray_delta.x > 0.0f ? -1.0f : 1.0f;
+        result.normal.y = 0.0f;
+    } else {
+        result.normal.x = 0.0f;
+        result.normal.y = ray_delta.y > 0.0f ? -1.0f : 1.0f;
+    }
+
+    return result;
+}
+
+SweepHit sweep_player_against_rect(Vector2 player_center, Vector2 move_delta, Rectangle player_box, Rectangle target_box) {
+    float player_half_width = player_box.width * 0.5f;
+    float player_half_height = player_box.height * 0.5f;
+
+    Rectangle expanded = {};
+    expanded.x = target_box.x - player_half_width;
+    expanded.y = target_box.y - player_half_height;
+    expanded.width = target_box.width + player_box.width;
+    expanded.height = target_box.height + player_box.height;
+
+    return ray_vs_rect(player_center, move_delta, expanded);
+}
+
+void gather_all_collidables(Vector2 move_delta) {
+    // Npcs
+    for(int entity_index = 0; entity_index < npc_count; entity_index++) {
+        NpcDef &npc = npcs[entity_index];
+        collidables_push(entity_collision_box(npc.pos));
+    }
+
+    // Buildings
+    {
+        Rectangle box = {
+            nurse_tent.pos.x - nurse_tent.size.x * 0.5f,
+            nurse_tent.pos.y - nurse_tent.size.y * 0.5f,
+            nurse_tent.size.x,
+            nurse_tent.size.y
+        };
+        collidables_push(box);
+    }
+
+    // Tiles intersecting the full swept area from start box to end box
+    {
+        Rectangle start_box = entity_collision_box(player_pos);
+
+        Vector2 end_pos = player_pos;
+        end_pos.x += move_delta.x;
+        end_pos.y += move_delta.y;
+        Rectangle end_box = entity_collision_box(end_pos);
+
+        float start_right = start_box.x + start_box.width;
+        float end_right = end_box.x + end_box.width;
+        float start_bottom = start_box.y + start_box.height;
+        float end_bottom = end_box.y + end_box.height;
+
+        Rectangle gather_box = {};
+        gather_box.x = start_box.x < end_box.x ? start_box.x : end_box.x;
+        gather_box.y = start_box.y < end_box.y ? start_box.y : end_box.y;
+
+        float gather_right = start_right > end_right ? start_right : end_right;
+        float gather_bottom = start_bottom > end_bottom ? start_bottom : end_bottom;
+
+        gather_box.width = gather_right - gather_box.x;
+        gather_box.height = gather_bottom - gather_box.y;
+
+        float epsilon = 0.001f;
+
+        int left   = tile_from_world(gather_box.x);
+        int right  = tile_from_world(gather_box.x + gather_box.width - epsilon);
+        int top    = tile_from_world(gather_box.y);
+        int bottom = tile_from_world(gather_box.y + gather_box.height - epsilon);
+
+        if(left < 0) left = 0;
+        if(right >= world_width) right = world_width - 1;
+        if(top < 0) top = 0;
+        if(bottom >= world_height) bottom = world_height - 1;
+
+        for(int y = top; y <= bottom; y++) {
+            for(int x = left; x <= right; x++) {
+                WorldEntityDef world_entity = world[y][x];
+                if(!world_entity_blocks_movement(world_entity.entity)) continue;
+
+                Rectangle box = {
+                    world_from_tile(x),
+                    world_from_tile(y),
+                    tile_size_f,
+                    tile_size_f
+                };
+                collidables_push(box);
+            }
+        }
+    }
+}
+
+void move_and_resolve_player_step(Vector2 move_delta) {
+    gather_all_collidables(move_delta);
+
+    Vector2 remaining_move = move_delta;
+    for(int iteration = 0; iteration < 2; iteration++) {
+        if(remaining_move.x == 0.0f && remaining_move.y == 0.0f) break;
+
+        Rectangle player_box = entity_collision_box(player_pos);
+
+        bool found_hit = false;
+        SweepHit best_hit = {};
+        int best_index = -1;
+
+        best_hit.time = 1.0f;
+
+        for(int idx = 0; idx < collidables_count; idx++) {
+            Rectangle &entity_box = collidables[idx];
+
+            SweepHit hit = sweep_player_against_rect(player_pos, remaining_move, player_box, entity_box);
+            if(!hit.hit) continue;
+
+            if(!found_hit || hit.time < best_hit.time) {
+                found_hit = true;
+                best_hit = hit;
+                best_index = idx;
+            }
+        }
+
+        if(!found_hit) {
+            player_pos.x += remaining_move.x;
+            player_pos.y += remaining_move.y;
+            break;
+        }
+
+        float epsilon = 0.001f;
+        float move_time = best_hit.time > epsilon ? best_hit.time - epsilon : 0.0f;
+
+        player_pos.x += remaining_move.x * move_time;
+        player_pos.y += remaining_move.y * move_time;
+
+        float dot = remaining_move.x * best_hit.normal.x + remaining_move.y * best_hit.normal.y;
+
+        Vector2 slide_move = remaining_move;
+        slide_move.x = remaining_move.x * (1.0f - move_time);
+        slide_move.y = remaining_move.y * (1.0f - move_time);
+
+        float slide_dot = slide_move.x * best_hit.normal.x + slide_move.y * best_hit.normal.y;
+        slide_move.x -= best_hit.normal.x * slide_dot;
+        slide_move.y -= best_hit.normal.y * slide_dot;
+
+        remaining_move = slide_move;
+    }
+
+    collidables_count = 0;
+}
+
+void move_and_resolve_player(float move_x, float move_y, float delta) {
+    Vector2 total_move = {};
+    total_move.x = float(move_x * player_speed) * delta;
+    total_move.y = float(move_y * player_speed) * delta;
+
+    float abs_x = total_move.x >= 0.0f ? total_move.x : -total_move.x;
+    float abs_y = total_move.y >= 0.0f ? total_move.y : -total_move.y;
+    float max_dist = abs_x > abs_y ? abs_x : abs_y;
+
+    float max_step = tile_size_f * 0.25f;
+    int step_count = (int)ceilf(max_dist / max_step);
+    if(step_count < 1) step_count = 1;
+
+    Vector2 step_move = {};
+    step_move.x = total_move.x / float(step_count);
+    step_move.y = total_move.y / float(step_count);
+
+    for(int step_index = 0; step_index < step_count; step_index++) {
+        move_and_resolve_player_step(step_move);
+    }
 }
 
 // =====================================================================================================================
@@ -1287,6 +1467,8 @@ int main(void) {
     tex_world_entities[(size_t)WorldEntity::WallGrassT]    = LoadTexture("sprites/wall_grass_t.png");
     tex_world_entities[(size_t)WorldEntity::WallGrassX]    = LoadTexture("sprites/wall_grass_x.png");
     tex_world_entities[(size_t)WorldEntity::Water]         = LoadTexture("sprites/water_tile.png");
+
+    nurse_tent = { LoadTexture("sprites/building_nurse_tent.png"), world_from_tile({10, 50}), { 192.0f, 192.0f } };
 
     strcpy(cocomon_element_names[(size_t)CocomonElement::Grass], "GRASS");
     strcpy(cocomon_element_names[(size_t)CocomonElement::Fire], "FIRE");
@@ -1377,7 +1559,7 @@ int main(void) {
     npcs[npc_count++] = { Npc::Yamenko, world_from_tile({50, 33}), EntityDirection::Up };
     npcs[npc_count++] = { Npc::Yamenko, world_from_tile({33, 50}), EntityDirection::Right };
     npcs[npc_count++] = { Npc::Yamenko, world_from_tile({5, 22}),  EntityDirection::Left };
-    npcs[npc_count++] = { Npc::Ippip,   world_from_tile({30, 30}), EntityDirection::Down };
+    npcs[npc_count++] = { Npc::Ippip,   world_from_tile({20, 30}), EntityDirection::Down };
 
     // --- WORLD SETUP ---
     for(int y = 0; y < 16; y++) {
@@ -1432,6 +1614,9 @@ int main(void) {
         screen_height = GetScreenHeight();
         game_state = game_state_next;
 
+        // SANITIY CHECKS
+        assert(collidables_count == 0);
+
         // DEBUG ONLY
         if (IsKeyPressed(KEY_F1)) state_transition_overworld();
         if (IsKeyPressed(KEY_F2)) enter_battle();
@@ -1468,15 +1653,11 @@ int main(void) {
                     if (key == MoveKey::A) move_x = -1.0f;
                     if (key == MoveKey::D) move_x =  1.0f;
                 }
-
-                Vector2 player_prev_pos = player_pos;
-                player_pos.x += float(move_x * player_speed) * delta;
-                player_pos.y += float(move_y * player_speed) * delta;
                 
                 // --- PLAYER COLLISION ---
-                Vector2 move_delta = player_pos - player_prev_pos;
-                move_and_resolve_player(move_delta);
-
+                move_and_resolve_player(move_x, move_y, delta);
+                
+                // --- ENCOUNTER ---
                 Rectangle col_box = player_collision_box();
                 bool moving = move_x != 0.0f || move_y != 0.0f;
                 bool standing_in_tall_grass = false;
@@ -1491,8 +1672,6 @@ int main(void) {
                         }
                     }
                 }
-
-                // --- ENCOUNTER ---
                 if (standing_in_tall_grass && moving && encounter_timer <= 0.0f && chance(chance_encounter)) {
                     enter_battle(true);
                     encounter_timer = encounter_interval;
@@ -1704,35 +1883,77 @@ int main(void) {
 
                 // Draw player
                 {
-                    Rectangle src = { 
-                        player_frame * person_width, 
-                        (int)player_animation_row * person_height, 
-                        person_width, 
-                        person_height,
+                    Renderable r = {
+                        .tex = tex_player,
+                        .src = { 
+                            player_frame * person_width,
+                            (int)player_animation_row * person_height,
+                            person_width,
+                            person_height
+                        },
+                        .dst = { player_pos.x, player_pos.y, person_width, person_height },
+                        .origin = { person_width * 0.5f, person_height },
+                        .rotation = 0.0f,
+                        .sort_y = player_pos.y
                     };
-                    Rectangle dst = { player_pos.x, player_pos.y, person_width, person_height };
-                    Vector2 origin = { person_width * 0.5f, person_height };
 
-                    // Rectangle col_box = player_collision_box(); 
-                    // DrawRectangle(col_box.x, col_box.y, col_box.width, col_box.height, BLUE);
-                    DrawTexturePro(tex_player, src, dst, origin, 0.0f, WHITE);
+                    renderables_push(r);
                 }
 
                 // Draw NPCS
                 for (int idx = 0; idx < npc_count; idx++) {
                     NpcDef npc = npcs[idx];
-                    Texture2D tex = tex_npc[(size_t)npc.npc];
-                    Rectangle src = { 
-                        (uint32_t)npc.dir * person_width, 
-                        0.0f, 
-                        person_width, 
-                        person_height,
-                    };
-                    Rectangle dst = { npc.pos.x, npc.pos.y, person_width, person_height };
-                    Vector2 origin = { person_width * 0.5f, person_height };
 
-                    DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
+                    Renderable r = {
+                        .tex = tex_npc[(size_t)npc.npc],
+                        .src = { 
+                            (uint32_t)npc.dir * person_width,
+                            0.0f,
+                            person_width,
+                            person_height
+                        },
+                        .dst = { npc.pos.x, npc.pos.y, person_width, person_height },
+                        .origin = { person_width * 0.5f, person_height },
+                        .rotation = 0.0f,
+                        .sort_y = npc.pos.y
+                    };
+
+                    renderables_push(r);
                 }
+
+                // Buildings
+                {
+                    Renderable r = {
+                        .tex = nurse_tent.tex,
+                        .src = {0.0f, 0.0f, 192.0f, 192.0f},
+                        .dst = { nurse_tent.pos.x, nurse_tent.pos.y, 192.0f, 192.0f },
+                        .origin = {192.0f * 0.5f, 192.0f * 0.5f},
+                        .rotation = 0.0f,
+                        .sort_y = nurse_tent.pos.y + 192.0f * 0.5f,
+                    };
+
+                    renderables_push(r);
+                }
+
+                qsort(renderables, renderables_count, sizeof(Renderable), cmp_renderable);
+
+                // You gotta draw 'em all
+                for (int i = 0; i < renderables_count; i++) {
+                    Renderable* r = &renderables[i];
+
+                    DrawTexturePro(
+                        r->tex,
+                        r->src,
+                        r->dst,
+                        r->origin,
+                        r->rotation,
+                        WHITE
+                    );
+                }
+
+                DrawRectangleRec(debug_collision_box, RED);
+
+                renderables_count = 0;
 
                 EndMode2D();
 
