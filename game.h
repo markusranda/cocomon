@@ -275,7 +275,6 @@ extern CocomonDef cocomon_defaults[max_cocomons];
 extern Texture2D tex_cocomon_fronts[max_cocomons];
 extern Texture2D tex_cocomon_backs[max_cocomons];
 extern Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
-extern TrainerDef trainer_defs[(size_t)TrainerId::COUNT];
 extern CocomonInstance player_party[max_player_party];
 extern int player_party_count;
 extern int player_active_party_slot;
@@ -309,6 +308,14 @@ extern float bobbing_interval;
 extern const float chance_encounter;
 extern float encounter_timer;
 extern float encounter_interval;
+
+bool cocomon_instance_is_valid(const CocomonInstance& instance);
+bool cocomon_instance_can_battle(const CocomonInstance& instance);
+CocomonDef scaled_cocomon_def(Cocomon species, int level);
+void refresh_cocomon_instance_stats(CocomonInstance& instance, bool full_heal = false);
+CocomonInstance make_cocomon_instance(Cocomon species, int level);
+void restore_cocomon_instance(CocomonInstance& instance);
+int experience_to_next_level(int level);
 
 void play_music(const char* path);
 void state_transition_overworld();

@@ -12,6 +12,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(cocomon
     main.cpp
     battle.cpp
+    battle_scene.cpp
+    trainers.cpp
 )
 
 target_include_directories(cocomon PRIVATE
