@@ -33,7 +33,7 @@ void open_cocomon_list(GameState return_state, bool forced_selection);
 // =====================================================================================================================
 // STATE
 // =====================================================================================================================
-
+Camera2D camera = {};
 Rectangle debug_collision_box = {};
 const Color color_surface_0 = Color{ 130, 130, 130, 250 };
 const Color color_surface_1 = Color{ 150, 150, 150, 250 };
@@ -1053,7 +1053,7 @@ void ui_draw_battle_damage_popup(int action_box_y) {
     DrawText(damage_text, (int)position.x, (int)position.y, font_size, color);
 }
 
-void ui_draw_state_cocomon_list() {
+void draw_state_cocomon_list() {
     int title_font_size = 40;
     int row_height = 82;
     int row_gap = 10;
@@ -1111,7 +1111,7 @@ void ui_draw_state_cocomon_list() {
     }
 }
 
-void ui_draw_state_battle() {
+void draw_state_battle() {
     int cocomon_status_box_width = int(screen_width * 0.35f);
     int cocomon_status_box_height = int(screen_height * 0.1f);
     int action_box_height = int(screen_height * 0.3f);
@@ -1145,6 +1145,102 @@ void ui_draw_state_battle() {
     if (battle_has_active_caption()) {
         ui_draw_battle_caption_banner(140, battle_active_caption, battle_caption_alpha());
     }
+}
+
+void draw_state_overworld() {
+    BeginMode2D(camera);
+    
+    // Draw world tiles
+    for (int y = 0; y < world_height; y++) {
+        for (int x = 0; x < world_width; x++) {
+            int world_x = x * tile_size_i;
+            int world_y = y * tile_size_i;
+
+            WorldEntityDef world_entity = world[y][x];
+            Texture2D tex = tex_world_entities[(size_t)world_entity.entity];
+            Rectangle src = { world_entity.frame_index * tile_size_f, 0.0f, tile_size_f, tile_size_f };
+            Rectangle dst = { (float)world_x + tile_size_f * 0.5f, (float)world_y + tile_size_f * 0.5f, tile_size_f, tile_size_f };
+            Vector2 origin = { tile_size_f * 0.5f, tile_size_f * 0.5f };
+
+            DrawTexturePro(tex, src, dst, origin, world_entity.rot, WHITE);
+        }
+    }
+
+    // Draw player
+    {
+        Renderable r = {
+            .tex = tex_player,
+            .src = { 
+                player_frame * person_width,
+                (int)player_animation_row * person_height,
+                person_width,
+                person_height
+            },
+            .dst = { player_pos.x, player_pos.y, person_width, person_height },
+            .origin = { person_width * 0.5f, person_height },
+            .rotation = 0.0f,
+            .sort_y = player_pos.y
+        };
+
+        renderables_push(r);
+    }
+
+    // Draw NPCS
+    for (int idx = 0; idx < npc_count; idx++) {
+        NpcDef npc = npcs[idx];
+
+        Renderable r = {
+            .tex = tex_npc[(size_t)npc.npc],
+            .src = { 
+                (uint32_t)npc.dir * person_width,
+                0.0f,
+                person_width,
+                person_height
+            },
+            .dst = { npc.pos.x, npc.pos.y, person_width, person_height },
+            .origin = { person_width * 0.5f, person_height },
+            .rotation = 0.0f,
+            .sort_y = npc.pos.y
+        };
+
+        renderables_push(r);
+    }
+
+    // Buildings
+    {
+        Renderable r = {
+            .tex = nurse_tent.tex,
+            .src = {0.0f, 0.0f, 192.0f, 192.0f},
+            .dst = { nurse_tent.pos.x, nurse_tent.pos.y, 192.0f, 192.0f },
+            .origin = {192.0f * 0.5f, 192.0f * 0.5f},
+            .rotation = 0.0f,
+            .sort_y = nurse_tent.pos.y + 192.0f * 0.5f,
+        };
+
+        renderables_push(r);
+    }
+
+    qsort(renderables, renderables_count, sizeof(Renderable), cmp_renderable);
+
+    // You gotta draw 'em all
+    for (int i = 0; i < renderables_count; i++) {
+        Renderable* r = &renderables[i];
+
+        DrawTexturePro(
+            r->tex,
+            r->src,
+            r->dst,
+            r->origin,
+            r->rotation,
+            WHITE
+        );
+    }
+
+    DrawRectangleRec(debug_collision_box, RED);
+
+    renderables_count = 0;
+
+    EndMode2D();
 }
 
 // ------ COLLISION HANDLING ------
@@ -1638,7 +1734,6 @@ int main(void) {
     world[world_height - 1][0] = { WorldEntity::WallGrassBend, 270.0f };
 
     // --- CAMERA SETUP ---
-    Camera2D camera = { 0 };
     camera.target = player_pos;
     camera.offset = Vector2{ screen_width * 0.5f, screen_height * 0.5f };
     camera.rotation = 0.0f;
@@ -1902,108 +1997,15 @@ int main(void) {
         
         switch (game_state) {
             case GameState::Overworld: {
-                BeginMode2D(camera);
-                
-                // Draw world tiles
-                for (int y = 0; y < world_height; y++) {
-                    for (int x = 0; x < world_width; x++) {
-                        int world_x = x * tile_size_i;
-                        int world_y = y * tile_size_i;
-
-                        WorldEntityDef world_entity = world[y][x];
-                        Texture2D tex = tex_world_entities[(size_t)world_entity.entity];
-                        Rectangle src = { world_entity.frame_index * tile_size_f, 0.0f, tile_size_f, tile_size_f };
-                        Rectangle dst = { (float)world_x + tile_size_f * 0.5f, (float)world_y + tile_size_f * 0.5f, tile_size_f, tile_size_f };
-                        Vector2 origin = { tile_size_f * 0.5f, tile_size_f * 0.5f };
-
-                        DrawTexturePro(tex, src, dst, origin, world_entity.rot, WHITE);
-                    }
-                }
-
-                // Draw player
-                {
-                    Renderable r = {
-                        .tex = tex_player,
-                        .src = { 
-                            player_frame * person_width,
-                            (int)player_animation_row * person_height,
-                            person_width,
-                            person_height
-                        },
-                        .dst = { player_pos.x, player_pos.y, person_width, person_height },
-                        .origin = { person_width * 0.5f, person_height },
-                        .rotation = 0.0f,
-                        .sort_y = player_pos.y
-                    };
-
-                    renderables_push(r);
-                }
-
-                // Draw NPCS
-                for (int idx = 0; idx < npc_count; idx++) {
-                    NpcDef npc = npcs[idx];
-
-                    Renderable r = {
-                        .tex = tex_npc[(size_t)npc.npc],
-                        .src = { 
-                            (uint32_t)npc.dir * person_width,
-                            0.0f,
-                            person_width,
-                            person_height
-                        },
-                        .dst = { npc.pos.x, npc.pos.y, person_width, person_height },
-                        .origin = { person_width * 0.5f, person_height },
-                        .rotation = 0.0f,
-                        .sort_y = npc.pos.y
-                    };
-
-                    renderables_push(r);
-                }
-
-                // Buildings
-                {
-                    Renderable r = {
-                        .tex = nurse_tent.tex,
-                        .src = {0.0f, 0.0f, 192.0f, 192.0f},
-                        .dst = { nurse_tent.pos.x, nurse_tent.pos.y, 192.0f, 192.0f },
-                        .origin = {192.0f * 0.5f, 192.0f * 0.5f},
-                        .rotation = 0.0f,
-                        .sort_y = nurse_tent.pos.y + 192.0f * 0.5f,
-                    };
-
-                    renderables_push(r);
-                }
-
-                qsort(renderables, renderables_count, sizeof(Renderable), cmp_renderable);
-
-                // You gotta draw 'em all
-                for (int i = 0; i < renderables_count; i++) {
-                    Renderable* r = &renderables[i];
-
-                    DrawTexturePro(
-                        r->tex,
-                        r->src,
-                        r->dst,
-                        r->origin,
-                        r->rotation,
-                        WHITE
-                    );
-                }
-
-                DrawRectangleRec(debug_collision_box, RED);
-
-                renderables_count = 0;
-
-                EndMode2D();
-
+                draw_state_overworld();
                 break;
             }
             case GameState::Battle: {
-                ui_draw_state_battle();
+                draw_state_battle();
                 break;
             }
             case GameState::CocomonList: {
-                ui_draw_state_cocomon_list();
+                draw_state_cocomon_list();
                 break;
             }
             default: {
