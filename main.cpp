@@ -52,6 +52,7 @@ Texture2D tex_cocomon_fronts[max_cocomons];
 Texture2D tex_cocomon_backs[max_cocomons];
 Texture2D tex_npc[(size_t)Npc::COUNT];
 Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
+Texture2D tex_background_battle_1 = {};
 Building nurse_tent = {};
 CocomonInstance player_party[max_player_party];
 int player_party_count = 0;
@@ -422,240 +423,6 @@ CocomonInstance& active_player_cocomon() {
 
 CocomonInstance& active_opponent_cocomon() {
     return battle_opponent_cocomon;
-}
-
-// ------ UI DRAW FUNCTIONS ------
-
-void ui_draw_cocomon_box(int x, int y, const CocomonDef& cocomon, float displayed_health = -1.0f) {
-    int width = int(screen_width * 0.35f);
-    int height = int(screen_height * 0.13f);
-    int health_box_width = width - 30;
-    int health_box_height = (height * 0.15f);
-    int name_font_size = 34;
-    int stats_font_size = 18;
-    int shown_health = displayed_health < 0.0f ? cocomon.health : (int)ceilf(displayed_health);
-    float health_ratio = (float)shown_health / (float)cocomon.max_health;
-    if (health_ratio < 0.0f) health_ratio = 0.0f;
-    if (health_ratio > 1.0f) health_ratio = 1.0f;
-    int health_fill_width = (int)(health_box_width * health_ratio);
-    int health_bar_y = y + 10 + name_font_size;
-    int stats_y = health_bar_y + health_box_height + 8;
-
-    DrawRectangle(x, y, width, height, GRAY);
-    DrawText(cocomon.name, x + 5, y + 5, name_font_size, WHITE);
-    DrawRectangle(x + 15, health_bar_y, health_box_width, health_box_height, DARKGRAY);
-    DrawRectangle(x + 15, health_bar_y, health_fill_width, health_box_height, GREEN);
-
-    char text_hp[32];
-    snprintf(text_hp, sizeof(text_hp), "HP %d/%d", shown_health, cocomon.max_health);
-    DrawText(text_hp, x + 15, stats_y, stats_font_size, WHITE);
-
-    char text_stats[64];
-    snprintf(text_stats, sizeof(text_stats), "ATK %d  DEF %d  SPD %d", cocomon.attack, cocomon.defense, cocomon.speed);
-    DrawText(text_stats, x + 15, stats_y + stats_font_size + 4, stats_font_size, WHITE);
-}
-
-void ui_draw_action_bar_move(int x, int y, int cell_width, int cell_height, bool selected, CocomonMoveDef move) {
-    int margin = 10;
-    Color color = selected ? color_primary : color_surface_3;
-
-    // Draw container
-    DrawRectangle(x, y, cell_width, cell_height, color);
-    
-    // Draw name
-    DrawText(move.name, x + margin, y + margin, font_size_move, WHITE);
-
-    // Draw PP
-    char text_pp[32];
-    snprintf(text_pp, 32, "%d / %d", move.pp, move.pp_max);
-    DrawText(text_pp, x + margin, y + margin + font_size_move + margin, font_size_move, WHITE);
-
-    // Draw dmg
-    char text_dmg[32];
-    snprintf(text_dmg, 32, "%s %d", cocomon_element_names[(size_t)move.element], move.dmg);
-    DrawText(text_dmg, x + margin, y + margin + font_size_move + margin + font_size_move + margin, font_size_move, WHITE);
-}
-
-void ui_draw_action_bar_moves(int x, int y, int width, int height) {
-    DrawRectangle(x, y, width, height, color_surface_1);
-
-    CocomonDef cocomon = active_player_cocomon().battler;
-    
-    // Grid setup
-    int gap = 10;
-    
-    int cell_width = (width - gap * 3) / 2;
-    int cell_height = (height - gap * 3) / 2;
-    
-    int top_left_x = x + gap;
-    int top_left_y = y + gap;
-    int top_right_x = top_left_x + cell_width + gap;
-    int top_right_y = top_left_y;
-    int bot_left_x = top_left_x;
-    int bot_left_y = top_left_y + cell_height + gap;
-    int bot_right_x = top_right_x;
-    int bot_right_y = bot_left_y;
-
-    // Top-left
-    if (cocomon.moves[0].flags > 0) {
-        ui_draw_action_bar_move(top_left_x, top_left_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::AbilityOne, cocomon.moves[0]);
-    }
-    // Top-right
-    if (cocomon.moves[1].flags > 0) {
-        ui_draw_action_bar_move(top_right_x, top_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::AbilityTwo, cocomon.moves[1]);
-    }
-    // Bottom-left
-    if (cocomon.moves[2].flags > 0) {
-        ui_draw_action_bar_move(bot_left_x, bot_left_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::AbilityThree, cocomon.moves[2]);
-    }
-    // Bottom-right
-    if (cocomon.moves[3].flags > 0) {
-        ui_draw_action_bar_move(bot_right_x, bot_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::AbilityFour, cocomon.moves[3]);
-    }
-}
-
-void ui_draw_action_bar_menu_item(int x, int y, int width, int height, bool selected, const char* text) {
-    int font_size = 24;
-    int text_width = MeasureText(text, font_size);
-
-    Color color = selected ? color_primary : color_surface_2;
-    
-    DrawRectangle(x, y, width, height, color);
-    DrawText(text, x + (width - text_width) / 2, y + (height - font_size) / 2, font_size, WHITE);
-}
-
-void ui_draw_action_bar_menu(int x, int y, int width, int height) {
-    DrawRectangle(x, y, width, height, color_surface_1);
-
-    int gap = 10;
-    int cell_width = (width - gap * 3) / 2;
-    int cell_height = (height - gap * 3) / 2;
-
-    int top_left_x = x + gap;
-    int top_left_y = y + gap;
-    int top_right_x = top_left_x + cell_width + gap;
-    int top_right_y = top_left_y;
-    int bot_left_x = top_left_x;
-    int bot_left_y = top_left_y + cell_height + gap;
-    int bot_right_x = top_right_x;
-    int bot_right_y = bot_left_y;
-
-    ui_draw_action_bar_menu_item(top_left_x, top_left_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Cocomon, "COCOMON");
-    ui_draw_action_bar_menu_item(top_right_x, top_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Cocoball, "COCOBALL");
-    ui_draw_action_bar_menu_item(bot_left_x, bot_left_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Nil, "");
-    ui_draw_action_bar_menu_item(bot_right_x, bot_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Run, "RUN");
-}
-
-void ui_draw_action_bar(int action_box_height, int action_box_y) {    
-    int x = 0;
-    int y = action_box_y;
-    int width = screen_width;
-    int height = action_box_height;
-
-    int moves_width = (int)(width * 0.6f);
-
-    DrawRectangle(x, y, width, height, color_surface_1);
-
-    ui_draw_action_bar_moves(x, y, moves_width, height);
-    ui_draw_action_bar_menu(x + moves_width, y, screen_width - moves_width, height);
-}
-
-void ui_draw_battle_caption_banner(int y, const char* message, float alpha) {
-    int font_size = 28;
-    int padding_x = 26;
-    int padding_y = 16;
-    int text_width = MeasureText(message, font_size);
-    int width = text_width + padding_x * 2;
-    int height = font_size + padding_y * 2;
-    int x = (screen_width - width) / 2;
-    Color bg = color_surface_0;
-    Color border = color_surface_3;
-    Color fg = WHITE;
-    bg.a = (unsigned char)(210.0f * alpha);
-    border.a = (unsigned char)(255.0f * alpha);
-    fg.a = (unsigned char)(255.0f * alpha);
-
-    DrawRectangle(x, y, width, height, bg);
-    DrawRectangleLinesEx(Rectangle{ (float)x, (float)y, (float)width, (float)height }, 4.0f, border);
-    DrawText(message, x + padding_x, y + padding_y, font_size, fg);
-}
-
-void ui_draw_battle_damage_popup(int action_box_y) {
-    if (battle_damage_popup_timer <= 0.0f || battle_damage_popup_side == BattleVisualSide::None || battle_damage_popup_amount <= 0) return;
-
-    float progress = 1.0f - (battle_damage_popup_timer / battle_damage_popup_duration);
-    float alpha = 1.0f - progress;
-    int font_size = 34;
-    char damage_text[16];
-    snprintf(damage_text, sizeof(damage_text), "-%d", battle_damage_popup_amount);
-
-    Vector2 position;
-    if (battle_damage_popup_side == BattleVisualSide::Player) {
-        position = Vector2{ 160.0f, (float)action_box_y - 220.0f - progress * 28.0f };
-    } else {
-        position = Vector2{ screen_width * 0.62f, 170.0f - progress * 28.0f };
-    }
-
-    Color color = { 255, 214, 102, (unsigned char)(255.0f * alpha) };
-    DrawText(damage_text, (int)position.x, (int)position.y, font_size, color);
-}
-
-void ui_draw_cocomon_list_screen() {
-    int title_font_size = 40;
-    int row_height = 82;
-    int row_gap = 10;
-    int start_y = 102;
-    int x = 80;
-    int width = screen_width - 160;
-
-    ClearBackground(color_surface_0);
-    DrawText("YOUR COCOMON", x, 40, title_font_size, WHITE);
-
-    for (int slot = 0; slot < player_party_count; slot++) {
-        const CocomonInstance& instance = player_party[slot];
-        bool selected = (int)ui_cursor == slot;
-        bool can_battle = cocomon_instance_can_battle(instance);
-        bool active = slot == player_active_party_slot;
-        int y = start_y + slot * (row_height + row_gap);
-        Color background = selected ? color_primary : color_surface_2;
-        Color text_color = can_battle ? WHITE : Color{ 210, 210, 210, 255 };
-        char summary[128];
-        char xp_text[64];
-        char tag[64];
-        int xp_needed = experience_to_next_level(instance.level);
-        float xp_ratio = xp_needed > 0 ? (float)instance.xp / (float)xp_needed : 0.0f;
-        int xp_bar_x = x + 18;
-        int xp_bar_y = y + row_height - 14;
-        int xp_bar_width = width - 36;
-        if (xp_ratio < 0.0f) xp_ratio = 0.0f;
-        if (xp_ratio > 1.0f) xp_ratio = 1.0f;
-
-        DrawRectangle(x, y, width, row_height, background);
-
-        snprintf(summary, sizeof(summary), "LV %d   HP %d/%d", instance.level, instance.battler.health, instance.battler.max_health);
-        snprintf(xp_text, sizeof(xp_text), "XP %d/%d", instance.xp, xp_needed);
-        DrawText(instance.battler.name, x + 18, y + 10, 30, text_color);
-        DrawText(summary, x + 18, y + 44, 22, text_color);
-        DrawText(xp_text, x + width - MeasureText(xp_text, 22) - 18, y + 44, 22, text_color);
-        DrawRectangle(xp_bar_x, xp_bar_y, xp_bar_width, 8, color_surface_1);
-        DrawRectangle(xp_bar_x, xp_bar_y, (int)(xp_bar_width * xp_ratio), 8, WHITE);
-
-        tag[0] = '\0';
-        if (active) strncpy(tag, "ACTIVE", sizeof(tag) - 1);
-        if (!can_battle) strncpy(tag, "FAINTED", sizeof(tag) - 1);
-        tag[sizeof(tag) - 1] = '\0';
-
-        if (tag[0] != '\0') {
-            int tag_width = MeasureText(tag, 24);
-            DrawText(tag, x + width - tag_width - 18, y + 12, 24, text_color);
-        }
-    }
-
-    if (cocomon_list_forced_selection) {
-        DrawText("Choose a Cocomon that can still fight.", x, screen_height - 60, 28, WHITE);
-    } else {
-        DrawText("ENTER to confirm   ESC to close", x, screen_height - 60, 28, WHITE);
-    }
 }
 
 float move_towards_float(float current, float target, float max_delta) {
@@ -1110,6 +877,276 @@ Vector2 battle_attack_offset(BattleVisualSide side) {
     return {};
 }
 
+// ------ UI DRAW FUNCTIONS ------
+
+void ui_draw_cocomon_box(int x, int y, const CocomonDef& cocomon, float displayed_health = -1.0f) {
+    int width = int(screen_width * 0.35f);
+    int height = int(screen_height * 0.13f);
+    int health_box_width = width - 30;
+    int health_box_height = (height * 0.15f);
+    int name_font_size = 34;
+    int stats_font_size = 18;
+    int shown_health = displayed_health < 0.0f ? cocomon.health : (int)ceilf(displayed_health);
+    float health_ratio = (float)shown_health / (float)cocomon.max_health;
+    if (health_ratio < 0.0f) health_ratio = 0.0f;
+    if (health_ratio > 1.0f) health_ratio = 1.0f;
+    int health_fill_width = (int)(health_box_width * health_ratio);
+    int health_bar_y = y + 10 + name_font_size;
+    int stats_y = health_bar_y + health_box_height + 8;
+
+    DrawRectangle(x, y, width, height, GRAY);
+    DrawText(cocomon.name, x + 5, y + 5, name_font_size, WHITE);
+    DrawRectangle(x + 15, health_bar_y, health_box_width, health_box_height, DARKGRAY);
+    DrawRectangle(x + 15, health_bar_y, health_fill_width, health_box_height, GREEN);
+
+    char text_hp[32];
+    snprintf(text_hp, sizeof(text_hp), "HP %d/%d", shown_health, cocomon.max_health);
+    DrawText(text_hp, x + 15, stats_y, stats_font_size, WHITE);
+
+    char text_stats[64];
+    snprintf(text_stats, sizeof(text_stats), "ATK %d  DEF %d  SPD %d", cocomon.attack, cocomon.defense, cocomon.speed);
+    DrawText(text_stats, x + 15, stats_y + stats_font_size + 4, stats_font_size, WHITE);
+}
+
+void ui_draw_action_bar_move(int x, int y, int cell_width, int cell_height, bool selected, CocomonMoveDef move) {
+    int margin = 10;
+    Color color = selected ? color_primary : color_surface_3;
+
+    // Draw container
+    DrawRectangle(x, y, cell_width, cell_height, color);
+    
+    // Draw name
+    DrawText(move.name, x + margin, y + margin, font_size_move, WHITE);
+
+    // Draw PP
+    char text_pp[32];
+    snprintf(text_pp, 32, "%d / %d", move.pp, move.pp_max);
+    DrawText(text_pp, x + margin, y + margin + font_size_move + margin, font_size_move, WHITE);
+
+    // Draw dmg
+    char text_dmg[32];
+    snprintf(text_dmg, 32, "%s %d", cocomon_element_names[(size_t)move.element], move.dmg);
+    DrawText(text_dmg, x + margin, y + margin + font_size_move + margin + font_size_move + margin, font_size_move, WHITE);
+}
+
+void ui_draw_action_bar_moves(int x, int y, int width, int height) {
+    DrawRectangle(x, y, width, height, color_surface_1);
+
+    CocomonDef cocomon = active_player_cocomon().battler;
+    
+    // Grid setup
+    int gap = 10;
+    
+    int cell_width = (width - gap * 3) / 2;
+    int cell_height = (height - gap * 3) / 2;
+    
+    int top_left_x = x + gap;
+    int top_left_y = y + gap;
+    int top_right_x = top_left_x + cell_width + gap;
+    int top_right_y = top_left_y;
+    int bot_left_x = top_left_x;
+    int bot_left_y = top_left_y + cell_height + gap;
+    int bot_right_x = top_right_x;
+    int bot_right_y = bot_left_y;
+
+    // Top-left
+    if (cocomon.moves[0].flags > 0) {
+        ui_draw_action_bar_move(top_left_x, top_left_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::AbilityOne, cocomon.moves[0]);
+    }
+    // Top-right
+    if (cocomon.moves[1].flags > 0) {
+        ui_draw_action_bar_move(top_right_x, top_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::AbilityTwo, cocomon.moves[1]);
+    }
+    // Bottom-left
+    if (cocomon.moves[2].flags > 0) {
+        ui_draw_action_bar_move(bot_left_x, bot_left_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::AbilityThree, cocomon.moves[2]);
+    }
+    // Bottom-right
+    if (cocomon.moves[3].flags > 0) {
+        ui_draw_action_bar_move(bot_right_x, bot_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::AbilityFour, cocomon.moves[3]);
+    }
+}
+
+void ui_draw_action_bar_menu_item(int x, int y, int width, int height, bool selected, const char* text) {
+    int font_size = 24;
+    int text_width = MeasureText(text, font_size);
+
+    Color color = selected ? color_primary : color_surface_2;
+    
+    DrawRectangle(x, y, width, height, color);
+    DrawText(text, x + (width - text_width) / 2, y + (height - font_size) / 2, font_size, WHITE);
+}
+
+void ui_draw_action_bar_menu(int x, int y, int width, int height) {
+    DrawRectangle(x, y, width, height, color_surface_1);
+
+    int gap = 10;
+    int cell_width = (width - gap * 3) / 2;
+    int cell_height = (height - gap * 3) / 2;
+
+    int top_left_x = x + gap;
+    int top_left_y = y + gap;
+    int top_right_x = top_left_x + cell_width + gap;
+    int top_right_y = top_left_y;
+    int bot_left_x = top_left_x;
+    int bot_left_y = top_left_y + cell_height + gap;
+    int bot_right_x = top_right_x;
+    int bot_right_y = bot_left_y;
+
+    ui_draw_action_bar_menu_item(top_left_x, top_left_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Cocomon, "COCOMON");
+    ui_draw_action_bar_menu_item(top_right_x, top_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Cocoball, "COCOBALL");
+    ui_draw_action_bar_menu_item(bot_left_x, bot_left_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Nil, "");
+    ui_draw_action_bar_menu_item(bot_right_x, bot_right_y, cell_width, cell_height, ui_cursor == (uint32_t)BattleUIIndex::Run, "RUN");
+}
+
+void ui_draw_action_bar(int action_box_height, int action_box_y) {    
+    int x = 0;
+    int y = action_box_y;
+    int width = screen_width;
+    int height = action_box_height;
+
+    int moves_width = (int)(width * 0.6f);
+
+    DrawRectangle(x, y, width, height, color_surface_1);
+
+    ui_draw_action_bar_moves(x, y, moves_width, height);
+    ui_draw_action_bar_menu(x + moves_width, y, screen_width - moves_width, height);
+}
+
+void ui_draw_battle_caption_banner(int y, const char* message, float alpha) {
+    int font_size = 28;
+    int padding_x = 26;
+    int padding_y = 16;
+    int text_width = MeasureText(message, font_size);
+    int width = text_width + padding_x * 2;
+    int height = font_size + padding_y * 2;
+    int x = (screen_width - width) / 2;
+    Color bg = color_surface_0;
+    Color border = color_surface_3;
+    Color fg = WHITE;
+    bg.a = (unsigned char)(210.0f * alpha);
+    border.a = (unsigned char)(255.0f * alpha);
+    fg.a = (unsigned char)(255.0f * alpha);
+
+    DrawRectangle(x, y, width, height, bg);
+    DrawRectangleLinesEx(Rectangle{ (float)x, (float)y, (float)width, (float)height }, 4.0f, border);
+    DrawText(message, x + padding_x, y + padding_y, font_size, fg);
+}
+
+void ui_draw_battle_damage_popup(int action_box_y) {
+    if (battle_damage_popup_timer <= 0.0f || battle_damage_popup_side == BattleVisualSide::None || battle_damage_popup_amount <= 0) return;
+
+    float progress = 1.0f - (battle_damage_popup_timer / battle_damage_popup_duration);
+    float alpha = 1.0f - progress;
+    int font_size = 34;
+    char damage_text[16];
+    snprintf(damage_text, sizeof(damage_text), "-%d", battle_damage_popup_amount);
+
+    Vector2 position;
+    if (battle_damage_popup_side == BattleVisualSide::Player) {
+        position = Vector2{ 160.0f, (float)action_box_y - 220.0f - progress * 28.0f };
+    } else {
+        position = Vector2{ screen_width * 0.62f, 170.0f - progress * 28.0f };
+    }
+
+    Color color = { 255, 214, 102, (unsigned char)(255.0f * alpha) };
+    DrawText(damage_text, (int)position.x, (int)position.y, font_size, color);
+}
+
+void ui_draw_state_cocomon_list() {
+    int title_font_size = 40;
+    int row_height = 82;
+    int row_gap = 10;
+    int start_y = 102;
+    int x = 80;
+    int width = screen_width - 160;
+
+    ClearBackground(color_surface_0);
+    DrawText("YOUR COCOMON", x, 40, title_font_size, WHITE);
+
+    for (int slot = 0; slot < player_party_count; slot++) {
+        const CocomonInstance& instance = player_party[slot];
+        bool selected = (int)ui_cursor == slot;
+        bool can_battle = cocomon_instance_can_battle(instance);
+        bool active = slot == player_active_party_slot;
+        int y = start_y + slot * (row_height + row_gap);
+        Color background = selected ? color_primary : color_surface_2;
+        Color text_color = can_battle ? WHITE : Color{ 210, 210, 210, 255 };
+        char summary[128];
+        char xp_text[64];
+        char tag[64];
+        int xp_needed = experience_to_next_level(instance.level);
+        float xp_ratio = xp_needed > 0 ? (float)instance.xp / (float)xp_needed : 0.0f;
+        int xp_bar_x = x + 18;
+        int xp_bar_y = y + row_height - 14;
+        int xp_bar_width = width - 36;
+        if (xp_ratio < 0.0f) xp_ratio = 0.0f;
+        if (xp_ratio > 1.0f) xp_ratio = 1.0f;
+
+        DrawRectangle(x, y, width, row_height, background);
+
+        snprintf(summary, sizeof(summary), "LV %d   HP %d/%d", instance.level, instance.battler.health, instance.battler.max_health);
+        snprintf(xp_text, sizeof(xp_text), "XP %d/%d", instance.xp, xp_needed);
+        DrawText(instance.battler.name, x + 18, y + 10, 30, text_color);
+        DrawText(summary, x + 18, y + 44, 22, text_color);
+        DrawText(xp_text, x + width - MeasureText(xp_text, 22) - 18, y + 44, 22, text_color);
+        DrawRectangle(xp_bar_x, xp_bar_y, xp_bar_width, 8, color_surface_1);
+        DrawRectangle(xp_bar_x, xp_bar_y, (int)(xp_bar_width * xp_ratio), 8, WHITE);
+
+        tag[0] = '\0';
+        if (active) strncpy(tag, "ACTIVE", sizeof(tag) - 1);
+        if (!can_battle) strncpy(tag, "FAINTED", sizeof(tag) - 1);
+        tag[sizeof(tag) - 1] = '\0';
+
+        if (tag[0] != '\0') {
+            int tag_width = MeasureText(tag, 24);
+            DrawText(tag, x + width - tag_width - 18, y + 12, 24, text_color);
+        }
+    }
+
+    if (cocomon_list_forced_selection) {
+        DrawText("Choose a Cocomon that can still fight.", x, screen_height - 60, 28, WHITE);
+    } else {
+        DrawText("ENTER to confirm   ESC to close", x, screen_height - 60, 28, WHITE);
+    }
+}
+
+void ui_draw_state_battle() {
+    int cocomon_status_box_width = int(screen_width * 0.35f);
+    int cocomon_status_box_height = int(screen_height * 0.1f);
+    int action_box_height = int(screen_height * 0.3f);
+    int action_box_y = screen_height - action_box_height;
+
+    // Background
+    DrawTexturePro(tex_background_battle_1, { 0.0f, 0.0f, 512.0f, 512.0f }, { 0.0f, 0.0f, (float)screen_width, (float)screen_height }, { 0.0f, 0.0f }, 0.0f, WHITE);
+    
+    // Opponent box
+    int opponent_cocomon_box_x = 15;
+    int opponent_cocomon_box_y = 15;
+    ui_draw_cocomon_box(15, 15, active_opponent_cocomon().battler, battle_opponent_health_display);
+
+    // Opponent cocomon
+    Vector2 opponent_attack_offset = battle_attack_offset(BattleVisualSide::Opponent);
+    DrawTextureEx(tex_cocomon_fronts[(size_t)opponent_cocomon_idx], Vector2{screen_width * 0.5f + opponent_attack_offset.x, float(opponent_cocomon_box_y - -bobbing) + opponent_attack_offset.y}, 0.0f, 12.0f, WHITE);
+
+    // Player box
+    int player_cocomon_box_x = screen_width - cocomon_status_box_width - 15;
+    int player_cocomon_box_y = action_box_y - cocomon_status_box_height - 15;
+    ui_draw_cocomon_box(player_cocomon_box_x, player_cocomon_box_y, active_player_cocomon().battler, battle_player_health_display);
+    
+    // Player cocomon
+    Texture2D tex_player_cocomon_back = tex_cocomon_backs[(size_t)player_cocomon_idx];
+    Vector2 player_attack_offset = battle_attack_offset(BattleVisualSide::Player);
+    DrawTextureEx(tex_player_cocomon_back, Vector2{50.0f + player_attack_offset.x, float(action_box_y - (tex_player_cocomon_back.height * 14.0f) * 0.75f - bobbing) + player_attack_offset.y}, 0.0f, 14.0f, WHITE);
+
+    // Action bar / battle playback overlays
+    ui_draw_action_bar(action_box_height, action_box_y);
+    ui_draw_battle_damage_popup(action_box_y);
+    if (battle_has_active_caption()) {
+        ui_draw_battle_caption_banner(140, battle_active_caption, battle_caption_alpha());
+    }
+}
+
 // ------ COLLISION HANDLING ------
 
 Rectangle entity_collision_box(Vector2 position) {
@@ -1467,6 +1504,8 @@ int main(void) {
     tex_world_entities[(size_t)WorldEntity::WallGrassT]    = LoadTexture("sprites/wall_grass_t.png");
     tex_world_entities[(size_t)WorldEntity::WallGrassX]    = LoadTexture("sprites/wall_grass_x.png");
     tex_world_entities[(size_t)WorldEntity::Water]         = LoadTexture("sprites/water_tile.png");
+
+    tex_background_battle_1 = LoadTexture("sprites/background_battle_1.png");
 
     nurse_tent = { LoadTexture("sprites/building_nurse_tent.png"), world_from_tile({10, 50}), { 192.0f, 192.0f } };
 
@@ -1960,40 +1999,11 @@ int main(void) {
                 break;
             }
             case GameState::Battle: {
-                int cocomon_status_box_width = int(screen_width * 0.35f);
-                int cocomon_status_box_height = int(screen_height * 0.1f);
-                int action_box_height = int(screen_height * 0.3f);
-                int action_box_y = screen_height - action_box_height;
-                
-                // Opponent box
-                int opponent_cocomon_box_x = 15;
-                int opponent_cocomon_box_y = 15;
-                ui_draw_cocomon_box(15, 15, active_opponent_cocomon().battler, battle_opponent_health_display);
-        
-                // Opponent cocomon
-                Vector2 opponent_attack_offset = battle_attack_offset(BattleVisualSide::Opponent);
-                DrawTextureEx(tex_cocomon_fronts[(size_t)opponent_cocomon_idx], Vector2{screen_width * 0.5f + opponent_attack_offset.x, float(opponent_cocomon_box_y - -bobbing) + opponent_attack_offset.y}, 0.0f, 12.0f, WHITE);
-        
-                // Player box
-                int player_cocomon_box_x = screen_width - cocomon_status_box_width - 15;
-                int player_cocomon_box_y = action_box_y - cocomon_status_box_height - 15;
-                ui_draw_cocomon_box(player_cocomon_box_x, player_cocomon_box_y, active_player_cocomon().battler, battle_player_health_display);
-                
-                // Player cocomon
-                Texture2D tex_player_cocomon_back = tex_cocomon_backs[(size_t)player_cocomon_idx];
-                Vector2 player_attack_offset = battle_attack_offset(BattleVisualSide::Player);
-                DrawTextureEx(tex_player_cocomon_back, Vector2{50.0f + player_attack_offset.x, float(action_box_y - (tex_player_cocomon_back.height * 14.0f) * 0.75f - bobbing) + player_attack_offset.y}, 0.0f, 14.0f, WHITE);
-
-                // Action bar / battle playback overlays
-                ui_draw_action_bar(action_box_height, action_box_y);
-                ui_draw_battle_damage_popup(action_box_y);
-                if (battle_has_active_caption()) {
-                    ui_draw_battle_caption_banner(140, battle_active_caption, battle_caption_alpha());
-                }
+                ui_draw_state_battle();
                 break;
             }
             case GameState::CocomonList: {
-                ui_draw_cocomon_list_screen();
+                ui_draw_state_cocomon_list();
                 break;
             }
             default: {
