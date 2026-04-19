@@ -68,6 +68,101 @@ struct CocomonListState {
     bool forced_selection = false;
 };
 
+Color cocomon_ui_element_color(CocomonElement element) {
+    switch (element) {
+        case CocomonElement::Grass:
+            return Color{ 111, 214, 126, 255 };
+        case CocomonElement::Water:
+            return Color{ 98, 191, 255, 255 };
+        case CocomonElement::Fire:
+            return Color{ 255, 155, 94, 255 };
+        case CocomonElement::Nil:
+        case CocomonElement::COUNT:
+            return Color{ 184, 201, 218, 255 };
+    }
+
+    return Color{ 184, 201, 218, 255 };
+}
+
+Color cocomon_ui_health_color(float ratio) {
+    if (ratio <= 0.20f) return Color{ 255, 95, 95, 255 };
+    if (ratio <= 0.50f) return Color{ 255, 184, 82, 255 };
+    return Color{ 95, 220, 126, 255 };
+}
+
+int fit_font_size_local(const char* text, int max_font_size, int min_font_size, int max_width) {
+    if (text == nullptr || text[0] == '\0') return max_font_size;
+    if (max_width <= 0) return min_font_size;
+
+    for (int font_size = max_font_size; font_size >= min_font_size; font_size--) {
+        if (MeasureText(text, font_size) <= max_width) return font_size;
+    }
+
+    return min_font_size;
+}
+
+void draw_text_with_shadow_local(const char* text, int x, int y, int font_size, Color color, Color shadow = Color{ 5, 10, 18, 160 }) {
+    DrawText(text, x + 2, y + 2, font_size, shadow);
+    DrawText(text, x, y, font_size, color);
+}
+
+void draw_panel_local(Rectangle rect, Color fill, Color border) {
+    Rectangle shadow = rect;
+    shadow.x += 3.0f;
+    shadow.y += 3.0f;
+
+    DrawRectangle((int)shadow.x, (int)shadow.y, (int)shadow.width, (int)shadow.height, Color{ 5, 10, 16, 72 });
+    DrawRectangle((int)rect.x, (int)rect.y, (int)rect.width, (int)rect.height, fill);
+    DrawRectangleLinesEx(rect, 2.0f, border);
+
+    Rectangle inner = Rectangle{ rect.x + 2.0f, rect.y + 2.0f, rect.width - 4.0f, rect.height - 4.0f };
+    if (inner.width > 0.0f && inner.height > 0.0f) {
+        DrawRectangleLinesEx(inner, 1.0f, Fade(border, 0.32f));
+    }
+}
+
+void draw_chip_local(int x, int y, const char* text, int font_size, Color fill, Color border, Color fg = WHITE) {
+    int padding_x = 10;
+    int height = font_size + 10;
+    int width = MeasureText(text, font_size) + padding_x * 2;
+    Rectangle chip = Rectangle{ (float)x, (float)y, (float)width, (float)height };
+
+    draw_panel_local(chip, fill, border);
+    draw_text_with_shadow_local(text, x + padding_x, y + 5, font_size, fg, Color{ 5, 10, 18, 120 });
+}
+
+void draw_bar_local(int x, int y, int width, int height, float ratio, Color fill, Color background, Color border) {
+    if (ratio < 0.0f) ratio = 0.0f;
+    if (ratio > 1.0f) ratio = 1.0f;
+
+    DrawRectangle(x, y, width, height, background);
+    int filled_width = (int)(width * ratio);
+    if (ratio > 0.0f && filled_width < height) filled_width = height;
+    if (filled_width > 0) {
+        DrawRectangle(x, y, filled_width, height, fill);
+    }
+    DrawRectangleLinesEx(Rectangle{ (float)x, (float)y, (float)width, (float)height }, 1.0f, border);
+}
+
+void draw_texture_contained(Texture2D texture, Rectangle bounds, Color tint = WHITE) {
+    if (texture.id == 0 || texture.width <= 0 || texture.height <= 0) return;
+
+    float scale_x = bounds.width / (float)texture.width;
+    float scale_y = bounds.height / (float)texture.height;
+    float scale = scale_x < scale_y ? scale_x : scale_y;
+    float draw_width = texture.width * scale;
+    float draw_height = texture.height * scale;
+    Rectangle src = Rectangle{ 0.0f, 0.0f, (float)texture.width, (float)texture.height };
+    Rectangle dst = Rectangle{
+        bounds.x + bounds.width * 0.5f,
+        bounds.y + bounds.height * 0.5f,
+        draw_width,
+        draw_height,
+    };
+
+    DrawTexturePro(texture, src, dst, Vector2{ draw_width * 0.5f, draw_height * 0.5f }, 0.0f, tint);
+}
+
 RuntimeAssets runtime_assets = {};
 WorldNpcState world_npc_state = {};
 TrainerEncounterState trainer_encounter_state = {};
@@ -654,60 +749,194 @@ void enter_battle(bool random_wild_encounter = false, int trainer_index = -1) {
 }
 
 void draw_state_cocomon_list() {
-    int title_font_size = 40;
-    int row_height = 82;
+    int outer_padding = 28;
+    int column_gap = 18;
+    int header_height = 64;
+    int footer_height = 58;
+    int content_y = outer_padding + header_height + 18;
+    int footer_y = screen_height - outer_padding - footer_height;
+    int left_width = (int)(screen_width * 0.60f);
+    int right_width = screen_width - outer_padding * 2 - column_gap - left_width;
+    int list_x = outer_padding;
+    int detail_x = list_x + left_width + column_gap;
     int row_gap = 10;
-    int start_y = 102;
-    int x = 80;
-    int width = screen_width - 160;
+    int selected_slot = player_party_count > 0 ? (int)ui_cursor : -1;
+    int row_height = 94;
 
-    ClearBackground(color_surface_0);
-    DrawText("YOUR COCOMON", x, 40, title_font_size, WHITE);
+    if (selected_slot >= player_party_count) selected_slot = player_party_count - 1;
+
+    if (player_party_count > 0) {
+        int available_height = footer_y - content_y;
+        row_height = (available_height - row_gap * (player_party_count - 1)) / player_party_count;
+        if (row_height < 84) row_height = 84;
+        if (row_height > 104) row_height = 104;
+    }
+
+    ClearBackground(Color{ 10, 16, 26, 255 });
+    DrawRectangleGradientV(0, 0, screen_width, screen_height, Color{ 27, 44, 65, 255 }, Color{ 9, 16, 26, 255 });
+    DrawRectangleGradientV(0, screen_height / 3, screen_width, screen_height * 2 / 3, Fade(Color{ 54, 93, 128, 255 }, 0.16f), Fade(Color{ 6, 9, 14, 255 }, 0.0f));
+
+    draw_panel_local(Rectangle{ (float)outer_padding, (float)outer_padding, (float)(screen_width - outer_padding * 2), (float)header_height }, Color{ 11, 20, 32, 220 }, Color{ 119, 138, 161, 230 });
+    draw_text_with_shadow_local("YOUR COCOMON", outer_padding + 20, outer_padding + 14, 36, WHITE);
+    draw_text_with_shadow_local("Battle-ready cards with portraits, health, and XP.", outer_padding + 22, outer_padding + 42, 18, Color{ 201, 216, 230, 255 });
 
     for (int slot = 0; slot < player_party_count; slot++) {
         const CocomonInstance& instance = player_party[slot];
-        bool selected = (int)ui_cursor == slot;
+        bool selected = selected_slot == slot;
         bool can_battle = cocomon_instance_can_battle(instance);
         bool active = slot == player_active_party_slot;
-        int y = start_y + slot * (row_height + row_gap);
-        Color background = selected ? color_primary : color_surface_2;
-        Color text_color = can_battle ? WHITE : Color{ 210, 210, 210, 255 };
-        char summary[128];
-        char xp_text[64];
-        char tag[64];
+        int y = content_y + slot * (row_height + row_gap);
+        int card_padding = 12;
+        int portrait_size = row_height - card_padding * 2;
+        int text_x = list_x + portrait_size + card_padding * 2 + 10;
+        int text_width = left_width - (text_x - list_x) - 18;
         int xp_needed = experience_to_next_level(instance.level);
         float xp_ratio = xp_needed > 0 ? (float)instance.xp / (float)xp_needed : 0.0f;
-        int xp_bar_x = x + 18;
-        int xp_bar_y = y + row_height - 14;
-        int xp_bar_width = width - 36;
+        float hp_ratio = instance.battler.max_health > 0 ? (float)instance.battler.health / (float)instance.battler.max_health : 0.0f;
+        Color accent = cocomon_ui_element_color(instance.battler.element);
+        Color fill = selected ? Color{ 17, 31, 47, 242 } : Color{ 11, 20, 32, 224 };
+        Color border = selected ? Fade(accent, 0.95f) : Color{ 96, 114, 134, 210 };
+        Color text_color = can_battle ? WHITE : Color{ 178, 187, 198, 255 };
+        Texture2D portrait = tex_cocomon_fronts[(size_t)instance.species];
+        char summary[96];
+        char hp_text[48];
+        char xp_text[48];
+        char level_text[16];
+        int name_font_size = fit_font_size_local(instance.battler.name, 27, 18, text_width - 120);
+
         if (xp_ratio < 0.0f) xp_ratio = 0.0f;
         if (xp_ratio > 1.0f) xp_ratio = 1.0f;
 
-        DrawRectangle(x, y, width, row_height, background);
+        draw_panel_local(Rectangle{ (float)list_x, (float)y, (float)left_width, (float)row_height }, fill, border);
+        DrawRectangle(list_x + 1, y + 1, 8, row_height - 2, Fade(accent, selected ? 0.85f : 0.55f));
 
-        snprintf(summary, sizeof(summary), "LV %d   HP %d/%d", instance.level, instance.battler.health, instance.battler.max_health);
-        snprintf(xp_text, sizeof(xp_text), "XP %d/%d", instance.xp, xp_needed);
-        DrawText(instance.battler.name, x + 18, y + 10, 30, text_color);
-        DrawText(summary, x + 18, y + 44, 22, text_color);
-        DrawText(xp_text, x + width - MeasureText(xp_text, 22) - 18, y + 44, 22, text_color);
-        DrawRectangle(xp_bar_x, xp_bar_y, xp_bar_width, 8, color_surface_1);
-        DrawRectangle(xp_bar_x, xp_bar_y, (int)(xp_bar_width * xp_ratio), 8, WHITE);
+        draw_panel_local(
+            Rectangle{ (float)(list_x + card_padding), (float)(y + card_padding), (float)portrait_size, (float)portrait_size },
+            can_battle ? Color{ 19, 35, 53, 215 } : Color{ 25, 29, 36, 215 },
+            Fade(accent, 0.68f));
+        draw_texture_contained(
+            portrait,
+            Rectangle{ (float)(list_x + card_padding + 6), (float)(y + card_padding + 6), (float)(portrait_size - 12), (float)(portrait_size - 12) },
+            can_battle ? WHITE : Fade(WHITE, 0.45f));
 
-        tag[0] = '\0';
-        if (active) strncpy(tag, "ACTIVE", sizeof(tag) - 1);
-        if (!can_battle) strncpy(tag, "FAINTED", sizeof(tag) - 1);
-        tag[sizeof(tag) - 1] = '\0';
+        snprintf(level_text, sizeof(level_text), "LV %d", instance.level);
+        snprintf(summary, sizeof(summary), "ATK %d   DEF %d   SPD %d", instance.battler.attack, instance.battler.defense, instance.battler.speed);
+        snprintf(hp_text, sizeof(hp_text), "HP %d / %d", instance.battler.health, instance.battler.max_health);
+        snprintf(xp_text, sizeof(xp_text), "XP %d / %d", instance.xp, xp_needed);
 
-        if (tag[0] != '\0') {
-            int tag_width = MeasureText(tag, 24);
-            DrawText(tag, x + width - tag_width - 18, y + 12, 24, text_color);
+        draw_text_with_shadow_local(instance.battler.name, text_x, y + 10, name_font_size, text_color);
+        draw_text_with_shadow_local(level_text, list_x + left_width - MeasureText(level_text, 20) - 18, y + 12, 20, Fade(accent, 0.98f));
+
+        const char* element_name = instance.battler.element == CocomonElement::Nil
+            ? "UNKNOWN"
+            : cocomon_element_names[(size_t)instance.battler.element];
+        draw_chip_local(text_x, y + 40, element_name, 14, Fade(accent, 0.28f), Fade(accent, 0.90f));
+
+        int tag_x = text_x + MeasureText(element_name, 14) + 50;
+        if (active) {
+            draw_chip_local(tag_x, y + 40, "ACTIVE", 14, Color{ 61, 120, 255, 70 }, Color{ 135, 179, 255, 220 });
+            tag_x += MeasureText("ACTIVE", 14) + 42;
+        }
+        if (!can_battle) {
+            draw_chip_local(tag_x, y + 40, "FAINTED", 14, Color{ 130, 43, 48, 90 }, Color{ 255, 124, 124, 220 });
+        }
+
+        draw_text_with_shadow_local(summary, text_x, y + 68, 16, Color{ 205, 217, 230, 255 });
+        draw_text_with_shadow_local(hp_text, text_x, y + row_height - 33, 16, text_color);
+        draw_text_with_shadow_local(xp_text, list_x + left_width - MeasureText(xp_text, 16) - 18, y + row_height - 33, 16, Color{ 194, 210, 226, 255 });
+
+        int bar_x = text_x;
+        int bar_width = left_width - (bar_x - list_x) - 18;
+        draw_bar_local(bar_x, y + row_height - 50, bar_width, 9, hp_ratio, cocomon_ui_health_color(hp_ratio), Color{ 30, 43, 58, 220 }, Color{ 162, 178, 196, 198 });
+        draw_bar_local(bar_x, y + row_height - 16, bar_width, 7, xp_ratio, Color{ 124, 211, 255, 255 }, Color{ 24, 37, 52, 220 }, Color{ 126, 166, 196, 178 });
+    }
+
+    Rectangle detail_rect = Rectangle{ (float)detail_x, (float)content_y, (float)right_width, (float)(footer_y - content_y) };
+    draw_panel_local(detail_rect, Color{ 11, 20, 32, 224 }, Color{ 106, 126, 148, 220 });
+
+    if (selected_slot >= 0 && selected_slot < player_party_count) {
+        const CocomonInstance& selected = player_party[selected_slot];
+        const CocomonDef& cocomon = selected.battler;
+        Color accent = cocomon_ui_element_color(cocomon.element);
+        float hp_ratio = cocomon.max_health > 0 ? (float)cocomon.health / (float)cocomon.max_health : 0.0f;
+        int xp_needed = experience_to_next_level(selected.level);
+        float xp_ratio = xp_needed > 0 ? (float)selected.xp / (float)xp_needed : 0.0f;
+        char level_text[16];
+        char hp_text[48];
+        char xp_text[48];
+        char stat_text[32];
+        int inner_x = detail_x + 16;
+        int inner_width = right_width - 32;
+        int portrait_top = content_y + 58;
+        int portrait_box_size = inner_width - 12;
+        Texture2D portrait = tex_cocomon_fronts[(size_t)selected.species];
+
+        snprintf(level_text, sizeof(level_text), "LV %d", selected.level);
+        snprintf(hp_text, sizeof(hp_text), "HP %d / %d", cocomon.health, cocomon.max_health);
+        snprintf(xp_text, sizeof(xp_text), "XP %d / %d", selected.xp, xp_needed);
+
+        draw_text_with_shadow_local("SELECTED", inner_x, content_y + 14, 18, Color{ 194, 209, 224, 255 });
+        draw_text_with_shadow_local(cocomon.name, inner_x, content_y + 38, fit_font_size_local(cocomon.name, 28, 18, inner_width - 72), WHITE);
+        draw_text_with_shadow_local(level_text, detail_x + right_width - MeasureText(level_text, 20) - 16, content_y + 40, 20, Fade(accent, 0.98f));
+
+        draw_chip_local(inner_x, content_y + 74, cocomon.element == CocomonElement::Nil ? "UNKNOWN" : cocomon_element_names[(size_t)cocomon.element], 14, Fade(accent, 0.28f), Fade(accent, 0.90f));
+        if (selected_slot == player_active_party_slot) {
+            draw_chip_local(inner_x + 100, content_y + 74, "ACTIVE", 14, Color{ 61, 120, 255, 70 }, Color{ 135, 179, 255, 220 });
+        }
+        if (!cocomon_instance_can_battle(selected)) {
+            draw_chip_local(inner_x + 100, content_y + 74, "FAINTED", 14, Color{ 130, 43, 48, 90 }, Color{ 255, 124, 124, 220 });
+        }
+
+        draw_panel_local(
+            Rectangle{ (float)inner_x, (float)portrait_top, (float)inner_width, (float)portrait_box_size },
+            Color{ 18, 34, 52, 215 },
+            Fade(accent, 0.78f));
+        DrawRectangleGradientV(inner_x + 8, portrait_top + 8, inner_width - 16, portrait_box_size - 16, Fade(accent, 0.18f), Fade(Color{ 8, 12, 18, 255 }, 0.05f));
+        draw_texture_contained(
+            portrait,
+            Rectangle{ (float)(inner_x + 12), (float)(portrait_top + 12), (float)(inner_width - 24), (float)(portrait_box_size - 24) },
+            cocomon_instance_can_battle(selected) ? WHITE : Fade(WHITE, 0.45f));
+
+        int bars_y = portrait_top + portrait_box_size + 16;
+        draw_text_with_shadow_local(hp_text, inner_x, bars_y, 18, WHITE);
+        draw_bar_local(inner_x, bars_y + 24, inner_width, 11, hp_ratio, cocomon_ui_health_color(hp_ratio), Color{ 30, 43, 58, 220 }, Color{ 162, 178, 196, 198 });
+        draw_text_with_shadow_local(xp_text, inner_x, bars_y + 44, 18, Color{ 198, 214, 230, 255 });
+        draw_bar_local(inner_x, bars_y + 68, inner_width, 9, xp_ratio, Color{ 124, 211, 255, 255 }, Color{ 24, 37, 52, 220 }, Color{ 126, 166, 196, 178 });
+
+        int stat_y = bars_y + 96;
+        int stat_gap = 10;
+        int stat_width = (inner_width - stat_gap * 2) / 3;
+        const char* stat_labels[3] = { "ATK", "DEF", "SPD" };
+        const int stat_values[3] = { cocomon.attack, cocomon.defense, cocomon.speed };
+        for (int stat_idx = 0; stat_idx < 3; stat_idx++) {
+            int stat_x = inner_x + stat_idx * (stat_width + stat_gap);
+            draw_panel_local(Rectangle{ (float)stat_x, (float)stat_y, (float)stat_width, 58.0f }, Color{ 16, 29, 44, 216 }, Color{ 84, 102, 126, 200 });
+            draw_text_with_shadow_local(stat_labels[stat_idx], stat_x + 12, stat_y + 10, 16, Color{ 184, 201, 218, 255 });
+            snprintf(stat_text, sizeof(stat_text), "%d", stat_values[stat_idx]);
+            draw_text_with_shadow_local(stat_text, stat_x + 12, stat_y + 28, 22, WHITE);
+        }
+
+        int moves_y = stat_y + 74;
+        draw_text_with_shadow_local("MOVES", inner_x, moves_y, 18, Color{ 194, 209, 224, 255 });
+        for (int move_slot = 0; move_slot < max_cocomon_moves; move_slot++) {
+            const CocomonMoveDef& move = cocomon.moves[move_slot];
+            if (move.flags == 0) continue;
+
+            Color move_accent = cocomon_ui_element_color(move.element);
+            int move_y = moves_y + 24 + move_slot * 42;
+            char pp_text[24];
+            snprintf(pp_text, sizeof(pp_text), "%u/%u PP", move.pp, move.pp_max);
+            draw_panel_local(Rectangle{ (float)inner_x, (float)move_y, (float)inner_width, 34.0f }, Color{ 14, 26, 40, 214 }, Fade(move_accent, 0.82f));
+            draw_text_with_shadow_local(move.name, inner_x + 12, move_y + 8, 18, WHITE);
+            draw_text_with_shadow_local(pp_text, inner_x + inner_width - MeasureText(pp_text, 16) - 12, move_y + 9, 16, Fade(move_accent, 0.98f));
         }
     }
 
+    draw_panel_local(Rectangle{ (float)outer_padding, (float)footer_y, (float)(screen_width - outer_padding * 2), (float)footer_height }, Color{ 11, 20, 32, 220 }, Color{ 98, 116, 138, 208 });
     if (cocomon_list_state.forced_selection) {
-        DrawText("Choose a Cocomon that can still fight.", x, screen_height - 60, 28, WHITE);
+        draw_text_with_shadow_local("Choose a Cocomon that can still fight.", outer_padding + 18, footer_y + 18, 24, WHITE);
     } else {
-        DrawText("ENTER to confirm   ESC to close", x, screen_height - 60, 28, WHITE);
+        draw_text_with_shadow_local("ENTER to confirm   ESC to close", outer_padding + 18, footer_y + 18, 24, WHITE);
     }
 }
 
