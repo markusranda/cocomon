@@ -36,7 +36,7 @@ CocomonInstance& active_player_instance() {
 }
 
 CocomonInstance& active_opponent_instance() {
-    return battle_opponent_cocomon;
+    return battle_opponent_party[battle_opponent_active_party_slot];
 }
 
 bool player_party_slot_is_usable_for_switch(int slot, bool allow_current_slot) {
@@ -53,6 +53,38 @@ bool player_has_usable_reserve() {
     }
 
     return false;
+}
+
+bool opponent_party_slot_is_usable_for_switch(int slot, bool allow_current_slot) {
+    if (slot < 0 || slot >= battle_opponent_party_count) return false;
+    if (battle_opponent_party[slot].species == Cocomon::Nil) return false;
+    if (battle_opponent_party[slot].battler.health <= 0) return false;
+    if (!allow_current_slot && slot == battle_opponent_active_party_slot) return false;
+    return true;
+}
+
+int first_usable_opponent_party_slot(bool allow_current_slot) {
+    for (int slot = 0; slot < battle_opponent_party_count; slot++) {
+        if (opponent_party_slot_is_usable_for_switch(slot, allow_current_slot)) return slot;
+    }
+
+    return -1;
+}
+
+void set_active_opponent_slot(int slot) {
+    battle_opponent_active_party_slot = slot;
+    opponent_cocomon_idx = battle_opponent_party[slot].species;
+}
+
+bool queue_opponent_switch(battle::TurnResult& result) {
+    int slot = first_usable_opponent_party_slot(false);
+    if (slot < 0) return false;
+
+    result.opponent_switched = true;
+    result.opponent_switch_slot = slot;
+    result.opponent_switched_from = active_opponent_instance().species;
+    result.opponent_switched_to = battle_opponent_party[slot].species;
+    return true;
 }
 
 bool player_has_open_party_slot() {
@@ -157,7 +189,9 @@ battle::TurnResult resolve_player_move(battle::Action action) {
     if (player.battler.speed >= opponent.battler.speed) {
         result.first_move = apply_move(player, true, opponent, false, action.move_slot);
         if (result.first_move.defender_fainted) {
-            result.finish_reason = battle::FinishReason::PlayerWon;
+            if (!queue_opponent_switch(result)) {
+                result.finish_reason = battle::FinishReason::PlayerWon;
+            }
             return result;
         }
 
@@ -188,7 +222,9 @@ battle::TurnResult resolve_player_move(battle::Action action) {
 
     result.second_move = apply_move(player, true, opponent, false, action.move_slot);
     if (result.second_move.defender_fainted) {
-        result.finish_reason = battle::FinishReason::PlayerWon;
+        if (!queue_opponent_switch(result)) {
+            result.finish_reason = battle::FinishReason::PlayerWon;
+        }
     }
 
     return result;
@@ -291,8 +327,10 @@ TurnResult resolve_player_action(Action action) {
             return resolve_player_move(action);
         }
         case ActionType::RunAway: {
-            result.action_resolved = true;
-            result.finish_reason = FinishReason::PlayerRanAway;
+            result.action_resolved = battle_is_wild_encounter;
+            if (result.action_resolved) {
+                result.finish_reason = FinishReason::PlayerRanAway;
+            }
             return result;
         }
         case ActionType::OpenCocomonMenu: {

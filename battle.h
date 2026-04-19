@@ -60,12 +60,16 @@ struct TurnResult {
     Action action = {};
     bool action_resolved = false;
     bool player_switched = false;
+    bool opponent_switched = false;
     bool party_switch_required = false;
     CaptureOutcome capture_outcome = CaptureOutcome::None;
     Cocomon captured_species = Cocomon::Nil;
     int captured_party_slot = -1;
+    int opponent_switch_slot = -1;
     Cocomon switched_from = Cocomon::Nil;
     Cocomon switched_to = Cocomon::Nil;
+    Cocomon opponent_switched_from = Cocomon::Nil;
+    Cocomon opponent_switched_to = Cocomon::Nil;
     MoveEvent first_move = {};
     MoveEvent second_move = {};
     FinishReason finish_reason = FinishReason::None;

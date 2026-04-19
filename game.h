@@ -97,6 +97,8 @@ enum class Cocomon {
 };
 
 constexpr int max_cocomon_moves = 4;
+constexpr int max_party_size = 6;
+constexpr int max_trainer_name_chars = 32;
 
 struct CocomonMoveDef {
     char name[32];
@@ -123,6 +125,11 @@ struct CocomonInstance {
     int level;
     int xp;
     CocomonDef battler;
+};
+
+struct TrainerPartyMemberDef {
+    Cocomon species;
+    int level;
 };
 
 struct FloatingHeart {
@@ -163,6 +170,16 @@ enum class WorldEntity {
     COUNT,
 };
 
+enum class TrainerId {
+    Nil,
+    YamenkoScout,
+    YamenkoMixer,
+    YamenkoAce,
+    YamenkoLookout,
+    IppipPyro,
+    COUNT,
+};
+
 struct WorldEntityDef {
     WorldEntity entity;
     float       rot;
@@ -170,11 +187,19 @@ struct WorldEntityDef {
     int         frame_index;
 };
 
+struct TrainerDef {
+    char name[max_trainer_name_chars];
+    Npc sprite;
+    int sight_tiles;
+    int party_count;
+    TrainerPartyMemberDef party[max_party_size];
+};
+
 struct NpcDef {
-    Npc npc;
     Vector2 pos;
     EntityDirection dir; // Notice: All npcs are assumed to have all four directions
-    bool battled; 
+    TrainerId trainer_id;
+    bool battled;
 };
 
 enum class BattleUIIndex : uint32_t {
@@ -221,7 +246,7 @@ struct SweepHit {
 constexpr int default_screen_width = 800;
 constexpr int default_screen_height = 800;
 constexpr int font_size_move = 32;
-constexpr int max_player_party = 6;
+constexpr int max_player_party = max_party_size;
 constexpr int max_cocomons = 32;
 constexpr int max_npcs = 32;
 constexpr int max_renderables = 4096;
@@ -250,10 +275,13 @@ extern CocomonDef cocomon_defaults[max_cocomons];
 extern Texture2D tex_cocomon_fronts[max_cocomons];
 extern Texture2D tex_cocomon_backs[max_cocomons];
 extern Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
+extern TrainerDef trainer_defs[(size_t)TrainerId::COUNT];
 extern CocomonInstance player_party[max_player_party];
 extern int player_party_count;
 extern int player_active_party_slot;
-extern CocomonInstance battle_opponent_cocomon;
+extern CocomonInstance battle_opponent_party[max_party_size];
+extern int battle_opponent_party_count;
+extern int battle_opponent_active_party_slot;
 extern Cocomon player_cocomon_idx;
 extern Cocomon opponent_cocomon_idx;
 extern bool battle_is_wild_encounter;
