@@ -125,10 +125,10 @@ float person_height = 64.0f;
 // --- BOBBING ---
 int bobbing = 6;
 float bobbing_timer = 0.0f;
-float bobbing_interval = 0.4f;
+float bobbing_interval = 4.0f;
 
 // --- ENOUNTER ---
-extern const float chance_encounter = 0.005f;
+extern const float chance_encounter = 0.05f;
 float encounter_timer = 0.0f;
 float encounter_interval = 1.0f;
 
@@ -291,6 +291,38 @@ bool cocomon_instance_can_battle(const CocomonInstance& instance) {
     return cocomon_instance_is_valid(instance) && instance.battler.health > 0;
 }
 
+Cocomon evolved_species_for_level(Cocomon species, int level) {
+    switch (species) {
+        case Cocomon::Caca:
+            if (level >= 12) return Cocomon::WakaCacaBlaze;
+            if (level >= 6) return Cocomon::WakaCaca;
+            return Cocomon::Caca;
+        case Cocomon::WakaCaca:
+            if (level >= 12) return Cocomon::WakaCacaBlaze;
+            return Cocomon::WakaCaca;
+        case Cocomon::WakaCacaBlaze:
+            return Cocomon::WakaCacaBlaze;
+        case Cocomon::Nil:
+        case Cocomon::LocoMoco:
+        case Cocomon::FrickaFlow:
+        case Cocomon::Molly:
+        case Cocomon::Jokko:
+        case Cocomon::COUNT:
+        default:
+            return species;
+    }
+}
+
+bool apply_evolution_for_level(CocomonInstance& instance) {
+    if (!cocomon_instance_is_valid(instance)) return false;
+
+    Cocomon evolved_species = evolved_species_for_level(instance.species, instance.level);
+    if (evolved_species == instance.species) return false;
+
+    instance.species = evolved_species;
+    return true;
+}
+
 CocomonDef scaled_cocomon_def(Cocomon species, int level) {
     CocomonDef result = cocomon_defaults[(size_t)species];
     int level_offset = level - 1;
@@ -313,6 +345,8 @@ CocomonDef scaled_cocomon_def(Cocomon species, int level) {
 
 void refresh_cocomon_instance_stats(CocomonInstance& instance, bool full_heal) {
     if (!cocomon_instance_is_valid(instance)) return;
+
+    apply_evolution_for_level(instance);
 
     int previous_max_health = instance.battler.max_health;
     int previous_health = instance.battler.health;
@@ -346,10 +380,10 @@ void refresh_cocomon_instance_stats(CocomonInstance& instance, bool full_heal) {
 
 CocomonInstance make_cocomon_instance(Cocomon species, int level) {
     CocomonInstance instance = {};
-    instance.species = species;
+    instance.species = evolved_species_for_level(species, level);
     instance.level = level;
     instance.xp = 0;
-    instance.battler = scaled_cocomon_def(species, level);
+    instance.battler = scaled_cocomon_def(instance.species, level);
     return instance;
 }
 
@@ -426,7 +460,7 @@ Cocomon random_wild_encounter_cocomon() {
         Cocomon::Molly,
         Cocomon::LocoMoco,
         Cocomon::Jokko,
-        Cocomon::WakaCaca,
+        Cocomon::Caca,
     };
     int encounter_count = (int)(sizeof(encounters) / sizeof(encounters[0]));
     return encounters[rand() % encounter_count];
@@ -589,6 +623,7 @@ void open_cocomon_list(GameState return_state, bool forced_selection) {
 }
 
 void enter_battle(bool random_wild_encounter = false, int trainer_index = -1) {
+    interactables_count = 0;
     battle_is_wild_encounter = random_wild_encounter;
     trainer_encounter_state.opponent_trainer_id = TrainerId::Nil;
     trainer_encounter_state.opponent_trainer_npc_index = -1;
@@ -1091,13 +1126,17 @@ int main(void) {
     tex_cocomon_fronts[(size_t)Cocomon::FrickaFlow] = LoadTexture("sprites/fricka_flow_front.png");
     tex_cocomon_fronts[(size_t)Cocomon::Molly] = LoadTexture("sprites/molly_front.png");
     tex_cocomon_fronts[(size_t)Cocomon::Jokko] = LoadTexture("sprites/jokko_front.png");
-    tex_cocomon_fronts[(size_t)Cocomon::WakaCaca] = LoadTexture("sprites/waka-caca_front.png");
+    tex_cocomon_fronts[(size_t)Cocomon::Caca] = LoadTexture("sprites/waka-caca_front.png");
+    tex_cocomon_fronts[(size_t)Cocomon::WakaCaca] = LoadTexture("sprites/waka-caca-2_front.png");
+    tex_cocomon_fronts[(size_t)Cocomon::WakaCacaBlaze] = LoadTexture("sprites/waka-caca-blaze_front.png");
 
     tex_cocomon_backs[(size_t)Cocomon::LocoMoco] = LoadTexture("sprites/locomoco_back.png");
     tex_cocomon_backs[(size_t)Cocomon::FrickaFlow] = LoadTexture("sprites/fricka_flow_back.png");
     tex_cocomon_backs[(size_t)Cocomon::Molly] = LoadTexture("sprites/molly_back.png");
     tex_cocomon_backs[(size_t)Cocomon::Jokko] = LoadTexture("sprites/jokko_back.png");
+    tex_cocomon_backs[(size_t)Cocomon::Caca] = LoadTexture("sprites/waka-caca_back.png");
     tex_cocomon_backs[(size_t)Cocomon::WakaCaca] = LoadTexture("sprites/waka-caca_back.png");
+    tex_cocomon_backs[(size_t)Cocomon::WakaCacaBlaze] = LoadTexture("sprites/waka-caca_back.png");
 
     runtime_assets.tex_npc[(size_t)Npc::Yamenko] = LoadTexture("sprites/npc_yamenko.png");
     runtime_assets.tex_npc[(size_t)Npc::Ippip] = LoadTexture("sprites/npc_ippip.png");
@@ -1172,6 +1211,16 @@ int main(void) {
             cocomon_moves[(size_t)CocomonMove::LeafBlade]
         }
     };
+    cocomon_defaults[(size_t)Cocomon::Caca] = {
+        .name = "CACA",
+        .element = CocomonElement::Water,
+        .health = 82,
+        .max_health = 82,
+        .attack = 14,
+        .defense = 9,
+        .speed = 13,
+        .moves = { cocomon_moves[(size_t)CocomonMove::WaterGun] }
+    };
     cocomon_defaults[(size_t)Cocomon::WakaCaca] = {
         .name = "WAKA CACA",
         .element = CocomonElement::Water,
@@ -1185,12 +1234,28 @@ int main(void) {
             cocomon_moves[(size_t)CocomonMove::LeafBlade]
         }
     };
+    cocomon_defaults[(size_t)Cocomon::WakaCacaBlaze] = {
+        .name = "WAKA CACA BLAZE",
+        .element = CocomonElement::Fire,
+        .health = 112,
+        .max_health = 112,
+        .attack = 22,
+        .defense = 14,
+        .speed = 18,
+        .moves = {
+            cocomon_moves[(size_t)CocomonMove::Ember],
+            cocomon_moves[(size_t)CocomonMove::WaterGun],
+            cocomon_moves[(size_t)CocomonMove::LeafBlade]
+        }
+    };
 
     cocomons[(size_t)Cocomon::LocoMoco] = cocomon_defaults[(size_t)Cocomon::LocoMoco];
     cocomons[(size_t)Cocomon::FrickaFlow] = cocomon_defaults[(size_t)Cocomon::FrickaFlow];
     cocomons[(size_t)Cocomon::Molly] = cocomon_defaults[(size_t)Cocomon::Molly];
     cocomons[(size_t)Cocomon::Jokko] = cocomon_defaults[(size_t)Cocomon::Jokko];
+    cocomons[(size_t)Cocomon::Caca] = cocomon_defaults[(size_t)Cocomon::Caca];
     cocomons[(size_t)Cocomon::WakaCaca] = cocomon_defaults[(size_t)Cocomon::WakaCaca];
+    cocomons[(size_t)Cocomon::WakaCacaBlaze] = cocomon_defaults[(size_t)Cocomon::WakaCacaBlaze];
 
     player_party[0] = make_cocomon_instance(Cocomon::LocoMoco, 5);
     player_party[1] = make_cocomon_instance(Cocomon::Molly, 4);

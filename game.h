@@ -92,7 +92,9 @@ enum class Cocomon {
     FrickaFlow,
     Molly,
     Jokko,
+    Caca,
     WakaCaca,
+    WakaCacaBlaze,
     COUNT,
 };
 
@@ -311,6 +313,8 @@ extern float encounter_interval;
 
 bool cocomon_instance_is_valid(const CocomonInstance& instance);
 bool cocomon_instance_can_battle(const CocomonInstance& instance);
+Cocomon evolved_species_for_level(Cocomon species, int level);
+bool apply_evolution_for_level(CocomonInstance& instance);
 CocomonDef scaled_cocomon_def(Cocomon species, int level);
 void refresh_cocomon_instance_stats(CocomonInstance& instance, bool full_heal = false);
 CocomonInstance make_cocomon_instance(Cocomon species, int level);

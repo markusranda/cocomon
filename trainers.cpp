@@ -41,7 +41,7 @@ const std::array<TrainerDef, (size_t)TrainerId::COUNT> trainer_defs = []() {
         { Cocomon::Molly, 4 },
     });
     defs[(size_t)TrainerId::YamenkoMixer] = make_trainer("YAMENKO MIXER", Npc::Yamenko, 8, {
-        { Cocomon::WakaCaca, 5 },
+        { Cocomon::Caca, 5 },
         { Cocomon::FrickaFlow, 4 },
     });
     defs[(size_t)TrainerId::YamenkoAce] = make_trainer("YAMENKO ACE", Npc::Yamenko, 8, {
@@ -51,12 +51,12 @@ const std::array<TrainerDef, (size_t)TrainerId::COUNT> trainer_defs = []() {
     });
     defs[(size_t)TrainerId::YamenkoLookout] = make_trainer("YAMENKO LOOKOUT", Npc::Yamenko, 8, {
         { Cocomon::Molly, 4 },
-        { Cocomon::WakaCaca, 4 },
+        { Cocomon::Caca, 4 },
     });
     defs[(size_t)TrainerId::IppipPyro] = make_trainer("IPPIP PYRO", Npc::Ippip, 6, {
         { Cocomon::LocoMoco, 6 },
         { Cocomon::Jokko, 5 },
-        { Cocomon::WakaCaca, 5 },
+        { Cocomon::Caca, 5 },
     });
 
     return defs;
