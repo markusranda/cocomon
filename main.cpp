@@ -873,6 +873,8 @@ void battle_queue_intro_playback() {
 }
 
 void enter_battle(bool random_wild_encounter = false) {
+    interactables_count = 0;
+
     battle_is_wild_encounter = random_wild_encounter;
     if (random_wild_encounter) {
         prepare_random_encounter();
