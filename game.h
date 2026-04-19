@@ -125,6 +125,14 @@ struct CocomonInstance {
     CocomonDef battler;
 };
 
+struct FloatingHeart {
+    Vector2 pos;      // World units
+    float radius;     // World units
+    float anim_timer; // Seconds
+    float lifetime;   // Seconds
+    bool go_left;
+};
+
 enum class EntityDirection : uint32_t {
     Down,
     Up,
@@ -195,6 +203,15 @@ struct Renderable {
     float sort_y;
 };
 
+enum class Interactable {
+    Nurse,
+};
+
+struct InteractableDef {
+    Interactable type;  
+    Rectangle hitbox;
+};
+
 struct SweepHit {
     bool hit;
     float time;
@@ -209,6 +226,8 @@ constexpr int max_cocomons = 32;
 constexpr int max_npcs = 32;
 constexpr int max_renderables = 4096;
 constexpr int max_collidables = 4096;
+constexpr int max_interactables = 4096;
+constexpr int max_floating_hearts = 4096;
 constexpr int world_width = 64;
 constexpr int world_height = 64;
 constexpr int tile_size_i = 32;
@@ -254,8 +273,6 @@ extern int player_frames_per_row;
 extern float player_frame_interval;
 extern PlayerAnimState last_player_animation_row;
 extern PlayerAnimState player_animation_row;
-extern float player_width;
-extern float player_height;
 
 extern int bobbing;
 extern float bobbing_timer;

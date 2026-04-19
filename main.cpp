@@ -33,8 +33,9 @@ void open_cocomon_list(GameState return_state, bool forced_selection);
 // =====================================================================================================================
 // STATE
 // =====================================================================================================================
+
 Camera2D camera = {};
-Rectangle debug_collision_box = {};
+Rectangle debug_rect = {};
 const Color color_surface_0 = Color{ 130, 130, 130, 250 };
 const Color color_surface_1 = Color{ 150, 150, 150, 250 };
 const Color color_surface_2 = Color{ 170, 170, 170, 250 };
@@ -53,6 +54,7 @@ Texture2D tex_cocomon_backs[max_cocomons];
 Texture2D tex_npc[(size_t)Npc::COUNT];
 Texture2D tex_world_entities[(size_t)WorldEntity::COUNT];
 Texture2D tex_background_battle_1 = {};
+Texture2D tex_heart = {};
 Building nurse_tent = {};
 CocomonInstance player_party[max_player_party];
 int player_party_count = 0;
@@ -69,6 +71,9 @@ bool music_loaded = false;
 WorldEntityDef world[world_height][world_width];
 NpcDef npcs[max_npcs] = {};
 uint32_t npc_count = 0;
+
+// --- SOUNDS ---
+Sound sound_kiss = {};
 
 // --- PLAYER ---
 Texture2D tex_player;
@@ -122,6 +127,17 @@ uint32_t renderables_count = 0;
 Rectangle collidables[max_collidables];
 uint32_t collidables_count = 0;
 
+// Interactables
+InteractableDef interactables[max_interactables];
+uint32_t interactables_count = 0;
+bool interacting = false;
+
+// Floating hearts
+FloatingHeart floating_hearts[max_floating_hearts];
+uint32_t floating_hearts_count = 0;
+const float floating_heart_interval = 0.4f;
+const float heart_speed = 100.0f;
+
 BattleBeat battle_beats[battle_playback_capacity];
 int battle_beat_count = 0;
 int battle_beat_index = 0;
@@ -153,6 +169,28 @@ float tile_anime_interval = 0.25f;
 // =====================================================================================================================
 // METHODS
 // =====================================================================================================================
+
+bool floating_hearts_push(FloatingHeart heart) {
+    if (floating_hearts_count >= max_floating_hearts) {
+        debug_break();
+        return false;
+    }
+
+    floating_hearts[floating_hearts_count++] = heart;
+
+    return true;
+}
+
+bool interactables_push(InteractableDef interactable) {
+    if (interactables_count >= max_interactables) {
+        debug_break();
+        return false;
+    }
+
+    interactables[interactables_count++] = interactable;
+
+    return true;
+}
 
 bool renderables_push(Renderable renderable) {
     if (renderables_count == max_renderables) {
@@ -208,8 +246,13 @@ void stop_current_music() {
     music_loaded = false;
 }
 
-bool chance(float probability) {
+bool rnd_chance(float probability) {
     return ((float)rand() / ((float)RAND_MAX + 1.0f)) < probability;
+}
+
+float rnd_range(float min, float max) {
+    float t = (float)rand() / ((float)RAND_MAX + 1.0f);
+    return min + t * (max - min);
 }
 
 // ------ COORDINATE CONVERTERS ------
@@ -1236,9 +1279,35 @@ void draw_state_overworld() {
         );
     }
 
-    DrawRectangleRec(debug_collision_box, RED);
+    // Draw text
+    if (interacting) {
+        const char* text = "PRESS 'E' TO INTERACT";
+        float font_size = 12.0f;
+        float text_width = (float)MeasureText(text, font_size);
+        float container_padding = 5.0f;
+        Vector2 pos = { player_pos.x - text_width * 0.5f, player_pos.y - person_height - font_size };
+        DrawRectangleRec({ pos.x - container_padding, pos.y - container_padding, text_width + 2.0f * container_padding, font_size + 2.0f * container_padding }, { 100, 100, 100, 150 });
+        DrawTextPro(GetFontDefault(), text, pos, {0}, 0.0f, font_size, 1.0f, WHITE);
+    }
 
+    // Draw floating hearts
+    for (int idx = 0; idx < floating_hearts_count; idx++) {
+        FloatingHeart &heart = floating_hearts[idx];
+        DrawTexturePro(
+            tex_heart,
+            {0.0f, 0.0f, 32.0f, 32.0f},
+            {heart.pos.x, heart.pos.y, 32.0f, 32.0f},
+            {16.0f, 16.0f}, // center origin
+            0.0f,
+            WHITE
+        );    
+    }
+    
+    DrawRectangleRec(debug_rect, RED);
+    
+    // Reset state
     renderables_count = 0;
+    interacting = false;
 
     EndMode2D();
 }
@@ -1268,55 +1337,6 @@ bool rect_intersects(Rectangle a, Rectangle b) {
            (a.y < b.y + b.height) &&
            (a.x + a.width > b.x)  &&
            (a.y + a.height > b.y);
-}
-
-static bool rect_overlaps(Rectangle a, Rectangle b) {
-    return a.x < b.x + b.width &&
-           a.x + a.width > b.x &&
-           a.y < b.y + b.height &&
-           a.y + a.height > b.y;
-}
-
-void resolve_against_npc_x(float delta_x) {
-    Rectangle player_box = player_collision_box();
-
-    for(int entity_index = 0; entity_index < npc_count; entity_index++) {
-        const NpcDef &npc = npcs[entity_index];
-
-        Rectangle entity_box = entity_collision_box(npc.pos);
-
-        if(!rect_overlaps(player_box, entity_box)) continue;
-
-        if(delta_x > 0.0f) {
-            player_pos.x = entity_box.x - player_box.width * 0.5f;
-        }
-        else if(delta_x < 0.0f) {
-            player_pos.x = entity_box.x + entity_box.width + player_box.width * 0.5f;
-        }
-
-        player_box = player_collision_box();
-    }
-}
-
-void resolve_against_npc_y(float delta_y) {
-    Rectangle player_box = player_collision_box();
-
-    for(int entity_index = 0; entity_index < npc_count; entity_index++) {
-        const NpcDef &npc = npcs[entity_index];
-
-        Rectangle entity_box = entity_collision_box(npc.pos);
-
-        if(!rect_overlaps(player_box, entity_box)) continue;
-
-        if(delta_y > 0.0f) {
-            player_pos.y = entity_box.y;
-        }
-        else if(delta_y < 0.0f) {
-            player_pos.y = entity_box.y + entity_box.height;
-        }
-
-        player_box = player_collision_box();
-    }
 }
 
 bool world_entity_blocks_movement(WorldEntity entity) {
@@ -1575,6 +1595,9 @@ int main(void) {
 
     srand((unsigned int)time(NULL));
 
+    sound_kiss = LoadSound("sounds/kiss-sound-effect.mp3");
+    SetSoundVolume(sound_kiss, 0.1f);
+
     tex_player = LoadTexture("sprites/player_sprites.png");
 
     tex_cocomon_fronts[(size_t)Cocomon::LocoMoco] = LoadTexture("sprites/locomoco_front.png");
@@ -1602,6 +1625,7 @@ int main(void) {
     tex_world_entities[(size_t)WorldEntity::Water]         = LoadTexture("sprites/water_tile.png");
 
     tex_background_battle_1 = LoadTexture("sprites/background_battle_1.png");
+    tex_heart = LoadTexture("sprites/heart.png");
 
     nurse_tent = { LoadTexture("sprites/building_nurse_tent.png"), world_from_tile({10, 50}), { 192.0f, 192.0f } };
 
@@ -1750,6 +1774,8 @@ int main(void) {
 
         // SANITIY CHECKS
         assert(collidables_count == 0);
+        assert(interactables_count == 0);
+        assert(!interacting);
 
         // DEBUG ONLY
         if (IsKeyPressed(KEY_F1)) state_transition_overworld();
@@ -1763,6 +1789,13 @@ int main(void) {
                 if (IsKeyPressed(KEY_TAB)) {
                     open_cocomon_list(GameState::Overworld, false);
                     break;
+                }
+
+                // --- GATHER INTERACTABLES ---
+                {
+                    float offset = 40.0f;
+                    Rectangle rect = { nurse_tent.pos.x - nurse_tent.size.x * 0.5f + offset, nurse_tent.pos.y + nurse_tent.size.y * 0.5f, nurse_tent.size.x - offset * 2.0f, 40.0f };
+                    interactables_push({ Interactable::Nurse, rect });
                 }
 
                 // --- PLAYER MOVEMENT ---
@@ -1806,7 +1839,7 @@ int main(void) {
                         }
                     }
                 }
-                if (standing_in_tall_grass && moving && encounter_timer <= 0.0f && chance(chance_encounter)) {
+                if (standing_in_tall_grass && moving && encounter_timer <= 0.0f && rnd_chance(chance_encounter)) {
                     enter_battle(true);
                     encounter_timer = encounter_interval;
                     break;
@@ -1883,6 +1916,71 @@ int main(void) {
                         enter_battle(false);
                         npc.battled = true; // TODO Lars needs to update this after victory.
                     }
+                }
+
+                // --- INTERACTABLES ---
+                // Let's figure out if the player is ready for interaction
+                // Notice: This only handles all interactions, so be careful.
+                Rectangle player_col_box = player_collision_box();
+                for (int idx = 0; idx < interactables_count; idx++) {
+                    InteractableDef interactable = interactables[idx];
+                    bool intersects = rect_intersects(player_col_box, interactable.hitbox);
+
+                    if (intersects) interacting = true;
+
+                    if (intersects && IsKeyPressed(KEY_E)) {
+                        switch(interactable.type) {
+                            case Interactable::Nurse: {
+                                for (int cocomon_idx = 0; cocomon_idx < player_party_count; cocomon_idx++) {
+                                    CocomonInstance &cocomon_instance = player_party[cocomon_idx];
+                                    cocomon_instance.battler.health = cocomon_instance.battler.max_health;
+                                }
+
+                                PlaySound(sound_kiss);
+
+                                Vector2 start_pos = { player_pos.x, player_pos.y - person_height - 5.0f };
+                                for (int i = 0; i < 3; i++) {
+                                    float offset_x = rnd_range(-5.0f, 5.0f);
+                                    float offset_y = rnd_range(0.0f, 5.0f);
+                                    Vector2 pos = { start_pos.x + offset_x, start_pos.y + offset_y };
+                                    FloatingHeart heart = { .pos = pos, .radius = 5.0f, .anim_timer = floating_heart_interval, .lifetime = 2.0f, .go_left = rnd_chance(0.5f) };
+                                    floating_hearts_push(heart);
+                                }
+                                
+                                break;
+                            }
+                            default: {
+                                debug_break();
+                            }
+                        }
+                    }
+                }
+                interactables_count = 0;
+
+                // --- FLOATING HEARTS ---
+                {
+                    int read_idx = 0;
+                    int write_idx = 0;
+                    for (; read_idx < floating_hearts_count; read_idx++) {
+                        FloatingHeart &heart = floating_hearts[read_idx];
+                        
+                        if ((heart.lifetime -= delta) <= 0.0f) {
+                            continue;
+                        }
+                        
+                        heart.pos.y -= heart_speed * delta;
+                        heart.pos.x += heart_speed * delta * (heart.go_left ? -1.0f : 1.0f);
+
+                        if ((heart.anim_timer -= delta) <= 0.0f) {
+                            heart.anim_timer = floating_heart_interval;
+                            heart.go_left = !heart.go_left;
+                        }
+
+                        floating_hearts[write_idx++] = heart;
+                    }
+
+                    // Update count with what remained
+                    floating_hearts_count = write_idx;
                 }
 
                 break;
